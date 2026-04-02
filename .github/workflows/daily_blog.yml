@@ -2,8 +2,8 @@ name: Daily PT Blog
 
 on:
   schedule:
-    - cron: '30 23 * * *'  # 매일 KST 08:30 (UTC 23:30 전날)
-  workflow_dispatch:        # 수동 실행 버튼
+    - cron: '30 23 * * 1,4'  # 매주 화,금 KST 08:30 (3일 주기)
+  workflow_dispatch:           # 수동 실행 버튼
 
 jobs:
   run-blog:
@@ -28,3 +28,11 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
         run: python fetch_and_write.py
+
+      - name: 사용 기록 커밋
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add used_articles.txt
+          git diff --staged --quiet || git commit -m "Update used articles"
+          git push
