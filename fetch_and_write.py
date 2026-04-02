@@ -5,7 +5,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime
 from bs4 import BeautifulSoup
-import google.generativeai as genai
+from google import genai
 
 # 환경변수에서 설정값 로드
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
@@ -14,8 +14,8 @@ GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 RECIPIENT_EMAIL = os.environ["RECIPIENT_EMAIL"]
 
 # Gemini 설정
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+client = genai.Client(api_key=GEMINI_API_KEY)
+MODEL = "gemini-2.0-flash"
 
 
 def fetch_pt_articles():
@@ -75,7 +75,7 @@ def select_and_write_blog(articles):
 {article_list}
 """
     
-    result = model.generate_content(selection_prompt)
+    result = client.models.generate_content(model=MODEL, contents=selection_prompt)
     try:
         selected_num = int(result.text.strip()[0]) - 1
     except:
@@ -107,7 +107,7 @@ def select_and_write_blog(articles):
 블로그 글만 작성하고 다른 말은 하지 마세요.
 """
     
-    blog_result = model.generate_content(blog_prompt)
+    blog_result = client.models.generate_content(model=MODEL, contents=blog_prompt)
     
     return {
         "title": selected["title"],
