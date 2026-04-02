@@ -1,4 +1,5 @@
 import os
+import re
 import smtplib
 import requests
 import xml.etree.ElementTree as ET
@@ -19,6 +20,7 @@ client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 MODEL = "claude-sonnet-4-6"
 
 RSS_URL = "https://www.psychologytoday.com/us/front/feed"
+USED_ARTICLES_FILE = "used_articles.txt"
 
 STYLE_SAMPLES = """
 [내 글쓰기 스타일 예시 1]
@@ -30,6 +32,21 @@ STYLE_SAMPLES = """
 [내 글쓰기 스타일 예시 3]
 질적연구에서 가장 중요한 절차라 할 수 있는 '의미단위' 추출 및 '코딩'을 지원하는 GEMs입니다. 지난 학기 개념도 연구를 하는 지도학생의 연구에 활용하고자 개발했는데 방학 동안 프롬프트를 좀 더 보완해서 저작권 등록(제 C-2026-004621호)을 마쳤습니다. 저작권 등록을 한 이유는 이를 통해서 저작료나 사용료를 받아 볼 심산이 아니고, 뭔가 공식적인 기록을 남긴다는 차원에서 등록 신청을 해봤는데, 잘 통과가 되었습니다.
 """
+
+
+def load_used_articles():
+    """이미 사용한 기사 URL 목록 로드"""
+    if os.path.exists(USED_ARTICLES_FILE):
+        with open(USED_ARTICLES_FILE, "r") as f:
+            return set(line.strip() for line in f if line.strip())
+    return set()
+
+
+def save_used_article(url):
+    """사용한 기사 URL 저장"""
+    with open(USED_ARTICLES_FILE, "a") as f:
+        f.write(url + "\n")
+    print(f"✅ 사용 기록 저장: {url}")
 
 
 def fetch_pt_articles():
@@ -51,7 +68,14 @@ def fetch_pt_articles():
             articles.append({"title": title, "url": url, "desc": desc})
 
     print(f"RSS로 수집된 기사 수: {len(articles)}")
-    return articles[:10]
+    return articles[:20]
+
+
+def filter_unused_articles(articles, used_urls):
+    """이미 사용한 기사 제외"""
+    unused = [a for a in articles if a["url"] not in used_urls]
+    print(f"미사용 기사 수: {len(unused)}")
+    return unused
 
 
 def fetch_article_content(url):
@@ -87,7 +111,6 @@ def select_and_write_blog(articles):
     )
 
     try:
-        import re
         nums = re.findall(r'\d+', selection_response.content[0].text.strip())
         selected_num = int(nums[0]) - 1
         if selected_num < 0 or selected_num >= len(articles):
@@ -174,8 +197,19 @@ def main():
     print("🔍 Psychology Today RSS 기사 수집 중...")
     articles = fetch_pt_articles()
 
+    print("📋 사용한 기사 목록 확인 중...")
+    used_urls = load_used_articles()
+    unused_articles = filter_unused_articles(articles, used_urls)
+
+    if not unused_articles:
+        print("⚠️ 새로운 기사가 없습니다. 다음 실행을 기다려주세요.")
+        return
+
     print("✍️ Claude로 블로그 글 작성 중...")
-    result = select_and_write_blog(articles)
+    result = select_and_write_blog(unused_articles)
+
+    print("💾 사용 기록 저장 중...")
+    save_used_article(result["url"])
 
     print("📧 이메일 발송 중...")
     send_email(result)
