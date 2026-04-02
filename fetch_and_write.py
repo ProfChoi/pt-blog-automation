@@ -104,7 +104,7 @@ def select_and_write_blog(articles):
     # 블로그 글 작성
     blog_response = client.messages.create(
         model=MODEL,
-        max_tokens=1500,
+        max_tokens=3000,
         messages=[{
             "role": "user",
             "content": f"""아래는 제가 직접 쓴 글의 스타일 예시입니다. 이 문체와 어투를 최대한 살려서 블로그 글을 작성해주세요.
@@ -122,7 +122,7 @@ def select_and_write_blog(articles):
 [작성 조건]
 - 위 스타일 예시의 문체와 어투를 그대로 살릴 것 (친근하고 자연스러운 구어체, 개인 경험 녹이기)
 - 한국 독자의 일상과 연결되는 예시 포함
-- 분량: 600~800자
+- 분량: 1200~1500자
 - 구성: 도입 → 핵심 내용 → 실생활 적용 → 마무리
 - 마지막에 "출처: Psychology Today - {selected['title']}" 포함
 
