@@ -6,23 +6,30 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime
 from bs4 import BeautifulSoup
-from google import genai
-from google.genai import types
+import anthropic
 
 # 환경변수에서 설정값 로드
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+CLAUDE_API_KEY = os.environ["CLAUDE_API_KEY"]
 GMAIL_ADDRESS = os.environ["GMAIL_ADDRESS"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 RECIPIENT_EMAIL = os.environ["RECIPIENT_EMAIL"]
 
-# Gemini 설정
-client = genai.Client(
-    api_key=GEMINI_API_KEY,
-    http_options=types.HttpOptions(api_version="v1beta")
-)
-MODEL = "gemini-2.5-flash"
+# Claude 클라이언트 설정
+client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+MODEL = "claude-sonnet-4-6"
 
 RSS_URL = "https://www.psychologytoday.com/us/front/feed"
+
+STYLE_SAMPLES = """
+[내 글쓰기 스타일 예시 1]
+어느덧 겨울 방학도 다 지나고 다음주면 2026학년도 1학기가 개강합니다. 마찬가지로 대학 1~2학년생을 대상으로 하는 교양 과목 '자기이해를 위한 긍정심리학'을 강의하는데 강의 자료를 만든지도 좀 오래된 것 같고, 또 최근 매우 핫한 Claude Cowork를 이용하면 PPT를 잘 만들어 준다고 해서, 리모델링을 한 번 해봤습니다. AI덕분에 참 편해진 측면도 있지만 모든 일에는 명암이 있듯 이런 부정적인 측면을 어떻게 사회가 수용하고 다뤄나갈 것인지에 대한 논의도 무척이나 시급하단 생각입니다.
+
+[내 글쓰기 스타일 예시 2]
+지난 학기 AI와 상담심리학의 융합교과목을 기획해서 직접 한 학기 동안 운영을 했었고, 처음이라 좌충우돌했지만 그럼에도 수강생들의 긍정적인 피드백, 그리고 AI를 고려하지 않고서는 앞으로 성장해 나갈 수 없다는 확고한 생각에 더해서 더더욱 이 분야 연구와 공부를 해야겠다는 생각도 있었습니다.
+
+[내 글쓰기 스타일 예시 3]
+질적연구에서 가장 중요한 절차라 할 수 있는 '의미단위' 추출 및 '코딩'을 지원하는 GEMs입니다. 지난 학기 개념도 연구를 하는 지도학생의 연구에 활용하고자 개발했는데 방학 동안 프롬프트를 좀 더 보완해서 저작권 등록(제 C-2026-004621호)을 마쳤습니다. 저작권 등록을 한 이유는 이를 통해서 저작료나 사용료를 받아 볼 심산이 아니고, 뭔가 공식적인 기록을 남긴다는 차원에서 등록 신청을 해봤는데, 잘 통과가 되었습니다.
+"""
 
 
 def fetch_pt_articles():
@@ -38,7 +45,6 @@ def fetch_pt_articles():
         title = item.findtext("title", "").strip()
         url = item.findtext("link", "").strip()
         desc = item.findtext("description", "").strip()
-        # HTML 태그 제거
         desc = BeautifulSoup(desc, "html.parser").get_text(strip=True)[:200]
 
         if title and url:
@@ -63,22 +69,26 @@ def fetch_article_content(url):
 
 
 def select_and_write_blog(articles):
-    """Gemini로 기사 선택 및 블로그 글 작성"""
+    """Claude로 기사 선택 및 블로그 글 작성"""
 
     article_list = "\n".join([
         f"{i+1}. {a['title']}\n   {a['desc']}"
         for i, a in enumerate(articles)
     ])
 
-    selection_prompt = f"""다음 Psychology Today 기사 목록에서 한국 독자(심리학·정신건강 관심층)에게 가장 유익하고 흥미로운 기사 번호 1개만 답하세요. 숫자만 답하세요.
-
-{article_list}"""
-
-    result = client.models.generate_content(model=MODEL, contents=selection_prompt)
+    # 기사 선택
+    selection_response = client.messages.create(
+        model=MODEL,
+        max_tokens=10,
+        messages=[{
+            "role": "user",
+            "content": f"다음 Psychology Today 기사 목록에서 한국 독자(심리학·정신건강 관심층)에게 가장 유익하고 흥미로운 기사 번호 1개만 답하세요. 숫자만 답하세요.\n\n{article_list}"
+        }]
+    )
 
     try:
         import re
-        nums = re.findall(r'\d+', result.text.strip())
+        nums = re.findall(r'\d+', selection_response.content[0].text.strip())
         selected_num = int(nums[0]) - 1
         if selected_num < 0 or selected_num >= len(articles):
             selected_num = 0
@@ -91,8 +101,17 @@ def select_and_write_blog(articles):
 
     content = fetch_article_content(selected["url"])
 
-    blog_prompt = f"""당신은 따뜻하고 친근한 심리학 블로거입니다.
-아래 Psychology Today 기사를 바탕으로 한국 독자를 위한 블로그 글을 작성해주세요.
+    # 블로그 글 작성
+    blog_response = client.messages.create(
+        model=MODEL,
+        max_tokens=1500,
+        messages=[{
+            "role": "user",
+            "content": f"""아래는 제가 직접 쓴 글의 스타일 예시입니다. 이 문체와 어투를 최대한 살려서 블로그 글을 작성해주세요.
+
+{STYLE_SAMPLES}
+
+---
 
 [원문 제목]
 {selected['title']}
@@ -101,20 +120,20 @@ def select_and_write_blog(articles):
 {content if content else "위 제목을 바탕으로 심리학적 내용을 작성해주세요."}
 
 [작성 조건]
-- 따뜻하고 친근한 문체 (독자에게 말 걸듯이)
+- 위 스타일 예시의 문체와 어투를 그대로 살릴 것 (친근하고 자연스러운 구어체, 개인 경험 녹이기)
 - 한국 독자의 일상과 연결되는 예시 포함
 - 분량: 600~800자
 - 구성: 도입 → 핵심 내용 → 실생활 적용 → 마무리
 - 마지막에 "출처: Psychology Today - {selected['title']}" 포함
 
 블로그 글만 작성하세요."""
-
-    blog_result = client.models.generate_content(model=MODEL, contents=blog_prompt)
+        }]
+    )
 
     return {
         "title": selected["title"],
         "url": selected["url"],
-        "blog_content": blog_result.text
+        "blog_content": blog_response.content[0].text
     }
 
 
@@ -138,7 +157,7 @@ def send_email(result):
 
 {'='*50}
 
-* 이 글은 Psychology Today 기사를 바탕으로 Gemini AI가 작성한 초안입니다.
+* 이 글은 Psychology Today 기사를 바탕으로 Claude AI가 작성한 초안입니다.
 * 내용을 검토하신 후 필요에 따라 수정하여 발행해주세요.
 """
 
@@ -155,7 +174,7 @@ def main():
     print("🔍 Psychology Today RSS 기사 수집 중...")
     articles = fetch_pt_articles()
 
-    print("✍️ Gemini로 블로그 글 작성 중...")
+    print("✍️ Claude로 블로그 글 작성 중...")
     result = select_and_write_blog(articles)
 
     print("📧 이메일 발송 중...")
