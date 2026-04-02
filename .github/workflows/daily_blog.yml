@@ -1,0 +1,30 @@
+name: Daily PT Blog
+
+on:
+  schedule:
+    - cron: '30 23 * * *'  # 매일 KST 08:30 (UTC 23:30 전날)
+  workflow_dispatch:        # 수동 실행 버튼
+
+jobs:
+  run-blog:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v3
+
+      - name: Python 설치
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 패키지 설치
+        run: pip install requests beautifulsoup4 google-generativeai
+
+      - name: 블로그 초안 생성 및 이메일 발송
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+        run: python fetch_and_write.py
