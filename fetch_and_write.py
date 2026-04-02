@@ -6,6 +6,7 @@ from email.mime.text import MIMEText
 from datetime import datetime
 from bs4 import BeautifulSoup
 from google import genai
+from google.genai import types
 
 # 환경변수에서 설정값 로드
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
@@ -14,8 +15,11 @@ GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 RECIPIENT_EMAIL = os.environ["RECIPIENT_EMAIL"]
 
 # Gemini 설정
-client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL = "gemini-2.5-flash-preview-04-17"
+client = genai.Client(
+    api_key=GEMINI_API_KEY,
+    http_options=types.HttpOptions(api_version="v1beta")
+)
+MODEL = "gemini-2.5-flash"
 
 
 def fetch_pt_articles():
@@ -55,7 +59,7 @@ def fetch_article_content(url):
     for tag in soup.select("div.entry-content p, article p"):
         content += tag.get_text(strip=True) + "\n"
     
-    return content[:3000]  # 너무 길면 잘라냄
+    return content[:3000]
 
 
 def select_and_write_blog(articles):
