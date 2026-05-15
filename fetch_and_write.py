@@ -9,13 +9,11 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 import anthropic
 
-# 환경변수에서 설정값 로드
 CLAUDE_API_KEY = os.environ["CLAUDE_API_KEY"]
 GMAIL_ADDRESS = os.environ["GMAIL_ADDRESS"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 RECIPIENT_EMAIL = os.environ["RECIPIENT_EMAIL"]
 
-# Claude 클라이언트 설정
 client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 MODEL = "claude-sonnet-4-6"
 
@@ -35,7 +33,6 @@ STYLE_SAMPLES = """
 
 
 def load_used_articles():
-    """이미 사용한 기사 URL 목록 로드"""
     if os.path.exists(USED_ARTICLES_FILE):
         with open(USED_ARTICLES_FILE, "r") as f:
             return set(line.strip() for line in f if line.strip())
@@ -43,14 +40,12 @@ def load_used_articles():
 
 
 def save_used_article(url):
-    """사용한 기사 URL 저장"""
     with open(USED_ARTICLES_FILE, "a") as f:
         f.write(url + "\n")
     print(f"✅ 사용 기록 저장: {url}")
 
 
 def fetch_pt_articles():
-    """Psychology Today RSS 피드로 최신 기사 가져오기"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
@@ -72,14 +67,12 @@ def fetch_pt_articles():
 
 
 def filter_unused_articles(articles, used_urls):
-    """이미 사용한 기사 제외"""
     unused = [a for a in articles if a["url"] not in used_urls]
     print(f"미사용 기사 수: {len(unused)}")
     return unused
 
 
 def fetch_article_content(url):
-    """기사 본문 가져오기"""
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         response = requests.get(url, headers=headers, timeout=10)
@@ -92,8 +85,42 @@ def fetch_article_content(url):
         return ""
 
 
+def get_day_theme():
+    """요일별 주제 설정 반환 (0=월, 1=화, 2=수, 3=목, 4=금, 5=토, 6=일)"""
+    weekday = datetime.now().weekday()
+
+    if weekday == 6:  # 일요일
+        return {
+            "selection_hint": "직장인(번아웃, 스트레스, 직장 내 인간관계, 업무 효율, 워라밸, 직장 내 갈등, 리더십, 성과 압박 등)과 관련된",
+            "writing_focus": "직장인의 일상과 연결되는 예시(직장 스트레스, 번아웃, 팀워크, 상사·동료 관계, 업무 동기 등)를 충분히 포함하고, 월요일을 앞둔 직장인에게 실질적인 도움이 되는 내용으로",
+            "label": "일요일 (직장인 주제)"
+        }
+    elif weekday == 1:  # 화요일
+        return {
+            "selection_hint": "한국인이 가장 관심을 갖는(자녀 교육, 입시, 가족 갈등, 노후 불안, 취업·경력, 외모·다이어트, 연애·결혼, 사회적 체면, 경제적 불안 등) 주제와 관련된",
+            "writing_focus": "한국 사회의 특수한 문화적 맥락(교육열, 가족주의, 체면 문화, 경쟁 사회 등)과 연결하여 공감대를 형성하는 내용으로",
+            "label": "화요일 (한국인 관심 주제)"
+        }
+    elif weekday == 3:  # 목요일
+        return {
+            "selection_hint": "최근 사회적 트렌드나 최신 심리학 연구(AI·기술과 심리, MZ세대, SNS 심리, 팬데믹 이후 변화, 기후불안, 최신 치료법 등)와 관련된",
+            "writing_focus": "최신 연구 동향이나 사회적 변화를 심리학적 관점에서 분석하고, 현 시대를 살아가는 독자에게 신선한 인사이트를 제공하는 내용으로",
+            "label": "목요일 (최신 주제)"
+        }
+    else:
+        day_names = ["월", "화", "수", "목", "금", "토", "일"]
+        return {
+            "selection_hint": "한국 독자(심리학·정신건강 관심층)에게 가장 유익하고 흥미로운",
+            "writing_focus": "한국 독자의 일상과 연결되는 예시를 포함하는",
+            "label": f"{day_names[weekday]}요일 (기본 주제)"
+        }
+
+
 def select_and_write_blog(articles):
     """Claude로 기사 선택 및 블로그 글 작성"""
+
+    theme = get_day_theme()
+    print(f"📅 오늘의 주제 방향: {theme['label']}")
 
     article_list = "\n".join([
         f"{i+1}. {a['title']}\n   {a['desc']}"
@@ -106,7 +133,7 @@ def select_and_write_blog(articles):
         max_tokens=10,
         messages=[{
             "role": "user",
-            "content": f"다음 Psychology Today 기사 목록에서 한국 독자(심리학·정신건강 관심층)에게 가장 유익하고 흥미로운 기사 번호 1개만 답하세요. 숫자만 답하세요.\n\n{article_list}"
+            "content": f"다음 Psychology Today 기사 목록에서 {theme['selection_hint']} 기사 번호 1개만 답하세요. 숫자만 답하세요.\n\n{article_list}"
         }]
     )
 
@@ -144,7 +171,7 @@ def select_and_write_blog(articles):
 
 [작성 조건]
 - 위 스타일 예시의 자연스러운 흐름은 유지하되, 심리학 전문가로서의 식견과 전문 용어를 적절히 녹여 신뢰감 있는 문체로 작성할 것
-- 한국 독자의 일상과 연결되는 예시 포함
+- {theme['writing_focus']} 작성할 것
 - 분량: 1200~1500자
 - 구성: 도입 → 심리학적 배경 설명 → 핵심 내용 → 실생활 적용 → 마무리
 - 마지막에 "출처: Psychology Today - {selected['title']}" 포함
@@ -161,7 +188,6 @@ def select_and_write_blog(articles):
 
 
 def send_email(result):
-    """Gmail로 블로그 초안 발송"""
     today = datetime.now().strftime("%Y년 %m월 %d일")
 
     msg = MIMEMultipart("alternative")
