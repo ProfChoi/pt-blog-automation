@@ -262,11 +262,11 @@ def main():
     print("✍️ Claude로 블로그 글 작성 중...")
     result = select_and_write_blog(unused_articles)
 
-    print("💾 사용 기록 저장 중...")
-    save_used_article(result["url"])
+print("📧 이메일 발송 중...")
+send_email(result)
 
-    print("📧 이메일 발송 중...")
-    send_email(result)
+print("💾 사용 기록 저장 중...")
+save_used_article(result["url"])
 
 
 if __name__ == "__main__":
