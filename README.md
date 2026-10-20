@@ -39,12 +39,10 @@ Google 계정 비밀번호를 변경하면 기존 앱 비밀번호가 폐기됩�
    저장했는지 확인합니다. 일반 Google 로그인 비밀번호가 아닙니다. 값을 채팅이나 코드에 붙여 넣지 마세요.
 3. 수정 PR을 기본 브랜치에 반영합니다. Settings → Actions → General에서 `contents: write`가
    허용되어야 합니다. 브랜치 보호 규칙이 상태 커밋을 금지하면 실제 발송 전에 안전하게 실패합니다.
-4. Actions → **Daily PT Blog → Run workflow**에서 **check_smtp**를 체크하여 실행합니다.
-   이 모드는 Claude 호출·메일 발송·기사 기록 변경 없이 SMTP 인증만 검사합니다.
-   성공 로그: `SMTP 인증 확인 성공 (메일 발송 없음)`.
-5. 인증 검사에 성공하면 **check_smtp**를 해제하고 실행합니다. 실제 초안 한 통을 보냅니다.
-   Gmail 보낸편지함/수신함, `delivery_state.json`의 `sent`, `used_articles.txt`의 URL을 확인합니다.
-   같은 날 다시 실행해도 추가 발송하지 않습니다.
+4. Actions → **Daily PT Blog → Run workflow**는 운영 실행입니다. 정상 인증되면
+   기존 조건으로 초안 한 통을 작성하여 등록된 수신 주소에 보냅니다.
+   Gmail 보낸편지함/수신함과 기사 사용 기록으로 결과를 확인합니다.
+   같은 한국 날짜에 이미 성공한 경우 추가 발송하지 않습니다.
 
 로그는 실패한 포트와 단계(connect/STARTTLS/login)를 보여주며 비밀번호·인증 전문은 출력하지 않습니다.
 양쪽 포트에서 login 단계 연결이 끊기면 계정/앱 비밀번호/Google 보안 알림 및 관리자 정책을 확인하세요.
@@ -85,24 +83,12 @@ SMTP에는 이 구현에서 사용할 수 있는 멱등 키가 없습니다. 동
    단순히 검색 결과가 없다는 이유만으로 재시도하면 중복 위험이 있습니다.
    불확실하다면 `sending`을 유지하세요.
 
-인증 실패는 위 Secrets와 계정을 확인한 뒤 `check_smtp`로 다시 검사합니다.
+인증 실패는 위 Secrets와 발신 계정을 확인한 뒤 운영 워크플로를 다시 실행합니다.
 명시적 인증/수신자/메시지 거절은 다음 실행에서 재시도할 수 있습니다.
 메시지 전송 중 시간 초과나 연결 유실은 미확정 상태로 남깁니다.
 
 기존 `used_articles.txt`는 유지합니다. 이력 전체를 삭제하면 과거 기사 중복 가능성이 생깁니다.
 새 ledger 도입 이전의 발송 성공 여부를 소급하여 알 수는 없습니다.
-
-## 테스트
-
-```powershell
-.venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python -m unittest discover -s tests -v
-```
-
-테스트는 Gmail/Claude를 모의 처리하여 실제 메일을 보내거나 API 비용을 발생시키지 않습니다.
-성공 후 기록, 당일 중복 방지, 인증 실패, 명시적 거절, 응답 유실, 발송 전후 원격 저장 실패,
-이전 날짜 재시도, 기존 선정·작성 조건과 한글 MIME을 검증합니다.
-PR의 **Tests** 워크플로는 비밀값 없이 같은 검증을 수행합니다.
 
 공식 문서:
 [비밀번호 변경 시 앱 비밀번호 폐기](https://support.google.com/accounts/answer/185833?hl=ko),

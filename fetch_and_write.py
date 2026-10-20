@@ -1,5 +1,4 @@
 import os
-import argparse
 import re
 import requests
 import xml.etree.ElementTree as ET
@@ -212,13 +211,7 @@ def build_email(result, sender, recipient, message_id):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--check-smtp", action="store_true")
-    args = parser.parse_args()
     mail = GmailDelivery.from_environment()
-    if args.check_smtp:
-        mail.authenticate()
-        return
     store = DeliveryStore()
     run_delivery(
         store, mail, fetch_pt_articles, select_and_write_blog, build_email,
