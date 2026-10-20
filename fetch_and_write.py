@@ -212,9 +212,37 @@ def send_email(result):
 
     msg.attach(MIMEText(body, "plain", "utf-8"))
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-        server.sendmail(GMAIL_ADDRESS, RECIPIENT_EMAIL, msg.as_string())
+import ssl
+
+print("📧 Gmail SMTP 연결 시도...")
+
+password = GMAIL_APP_PASSWORD.replace(" ", "").strip()
+
+try:
+    context = ssl.create_default_context()
+
+    with smtplib.SMTP_SSL(
+        "smtp.gmail.com",
+        465,
+        context=context,
+        timeout=30
+    ) as server:
+        print("✅ SMTP 연결 성공")
+        server.login(GMAIL_ADDRESS.strip(), password)
+        print("✅ Gmail 인증 성공")
+        server.sendmail(
+            GMAIL_ADDRESS,
+            RECIPIENT_EMAIL,
+            msg.as_string()
+        )
+        print("✅ 이메일 발송 성공")
+
+except smtplib.SMTPServerDisconnected:
+    print("❌ SMTP 인증 중 서버 연결 종료")
+    raise
+except smtplib.SMTPAuthenticationError:
+    print("❌ Gmail 인증 실패: 앱 비밀번호 및 계정을 확인하세요.")
+    raise
 
     print(f"✅ 이메일 발송 완료: {today}")
 
