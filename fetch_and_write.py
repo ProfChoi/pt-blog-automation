@@ -187,7 +187,10 @@ def select_and_write_blog(articles):
     }
 
 
+
 def send_email(result):
+    import ssl
+
     today = datetime.now().strftime("%Y년 %m월 %d일")
 
     msg = MIMEMultipart("alternative")
@@ -195,7 +198,7 @@ def send_email(result):
     msg["From"] = GMAIL_ADDRESS
     msg["To"] = RECIPIENT_EMAIL
 
-    body = f"""안녕하세요, 교수님! 오늘의 블로그 초안입니다. 😊
+    body = f"""안녕하세요, 교수님! 오늘의 블로그 초안입니다.
 
 📰 원문 기사: {result['title']}
 🔗 원문 링크: {result['url']}
@@ -212,51 +215,39 @@ def send_email(result):
 
     msg.attach(MIMEText(body, "plain", "utf-8"))
 
-import ssl
+    password = GMAIL_APP_PASSWORD.replace(" ", "").strip()
 
-print("📧 Gmail SMTP 연결 시도...")
+    try:
+        context = ssl.create_default_context()
 
-password = GMAIL_APP_PASSWORD.replace(" ", "").strip()
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.ehlo()
+            print("✅ SMTP STARTTLS 연결 성공", flush=True)
 
-try:
-    context = ssl.create_default_context()
+            server.login(GMAIL_ADDRESS.strip(), password)
+            print("✅ Gmail 인증 성공", flush=True)
 
-try:
-    with smtplib.SMTP(
-        "smtp.gmail.com", 587, timeout=30
-    ) as server:
-        server.ehlo()
-        server.starttls(context=ssl.create_default_context())
-        server.ehlo()
-        print("✅ SMTP STARTTLS 연결 성공")
+            server.sendmail(
+                GMAIL_ADDRESS,
+                [RECIPIENT_EMAIL],
+                msg.as_string()
+            )
 
-        server.login(GMAIL_ADDRESS.strip(), password)
-        print("✅ Gmail 인증 성공")
+        print(f"✅ 이메일 발송 완료: {today}", flush=True)
 
-        server.sendmail(
-            GMAIL_ADDRESS,
-            RECIPIENT_EMAIL,
-            msg.as_string()
-        )
-        print("✅ 이메일 발송 성공")
-        print("✅ SMTP 연결 성공")
-        server.login(GMAIL_ADDRESS.strip(), password)
-        print("✅ Gmail 인증 성공")
-        server.sendmail(
-            GMAIL_ADDRESS,
-            RECIPIENT_EMAIL,
-            msg.as_string()
-        )
-        print("✅ 이메일 발송 성공")
+    except smtplib.SMTPAuthenticationError:
+        print("❌ Gmail 인증 실패: 계정 및 앱 비밀번호 확인", flush=True)
+        raise
 
-except smtplib.SMTPServerDisconnected:
-    print("❌ SMTP 인증 중 서버 연결 종료")
-    raise
-except smtplib.SMTPAuthenticationError:
-    print("❌ Gmail 인증 실패: 앱 비밀번호 및 계정을 확인하세요.")
-    raise
+    except smtplib.SMTPServerDisconnected:
+        print("❌ SMTP 서버 연결이 예기치 않게 종료됨", flush=True)
+        raise
 
-    print(f"✅ 이메일 발송 완료: {today}")
+    except Exception as e:
+        print(f"❌ 이메일 발송 오류: {type(e).__name__}", flush=True)
+        raise
 
 
 def main():
