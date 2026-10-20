@@ -1,20 +1,15 @@
 import os
 import re
-import smtplib
 import requests
 import xml.etree.ElementTree as ET
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime
+from zoneinfo import ZoneInfo
+from delivery import GmailDelivery, DeliveryStore, run_delivery
 from bs4 import BeautifulSoup
 import anthropic
 
-CLAUDE_API_KEY = os.environ["CLAUDE_API_KEY"]
-GMAIL_ADDRESS = os.environ["GMAIL_ADDRESS"]
-GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
-RECIPIENT_EMAIL = os.environ["RECIPIENT_EMAIL"]
-
-client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 MODEL = "claude-sonnet-4-6"
 
 RSS_URL = "https://www.psychologytoday.com/us/front/feed"
@@ -39,17 +34,12 @@ def load_used_articles():
     return set()
 
 
-def save_used_article(url):
-    with open(USED_ARTICLES_FILE, "a") as f:
-        f.write(url + "\n")
-    print(f"✅ 사용 기록 저장: {url}")
-
-
 def fetch_pt_articles():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
     response = requests.get(RSS_URL, headers=headers, timeout=15)
+    response.raise_for_status()
     root = ET.fromstring(response.content)
 
     articles = []
@@ -76,6 +66,7 @@ def fetch_article_content(url):
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
         content = ""
         for tag in soup.select("div.entry-content p, article p, .article-body p"):
@@ -87,7 +78,7 @@ def fetch_article_content(url):
 
 def get_day_theme():
     """요일별 주제 설정 반환 (0=월, 1=화, 2=수, 3=목, 4=금, 5=토, 6=일)"""
-    weekday = datetime.now().weekday()
+    weekday = datetime.now(ZoneInfo("Asia/Seoul")).weekday()
 
     if weekday == 6:  # 일요일
         return {
@@ -119,6 +110,7 @@ def get_day_theme():
 def select_and_write_blog(articles):
     """Claude로 기사 선택 및 블로그 글 작성"""
 
+    client = anthropic.Anthropic(api_key=os.environ["CLAUDE_API_KEY"])
     theme = get_day_theme()
     print(f"📅 오늘의 주제 방향: {theme['label']}")
 
@@ -188,15 +180,15 @@ def select_and_write_blog(articles):
 
 
 
-def send_email(result):
-    import ssl
+def build_email(result, sender, recipient, message_id):
 
-    today = datetime.now().strftime("%Y년 %m월 %d일")
+    today = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y년 %m월 %d일")
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"[PT 블로그 초안] {today} - {result['title']}"
-    msg["From"] = GMAIL_ADDRESS
-    msg["To"] = RECIPIENT_EMAIL
+    msg["From"] = sender
+    msg["To"] = recipient
+    msg["Message-ID"] = message_id
 
     body = f"""안녕하세요, 교수님! 오늘의 블로그 초안입니다.
 
@@ -215,68 +207,22 @@ def send_email(result):
 
     msg.attach(MIMEText(body, "plain", "utf-8"))
 
-    password = GMAIL_APP_PASSWORD.replace(" ", "").strip()
-
-    try:
-        context = ssl.create_default_context()
-
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
-            print("✅ SMTP STARTTLS 연결 성공", flush=True)
-
-            server.login(GMAIL_ADDRESS.strip(), password)
-            print("✅ Gmail 인증 성공", flush=True)
-
-            server.sendmail(
-                GMAIL_ADDRESS,
-                [RECIPIENT_EMAIL],
-                msg.as_string()
-            )
-
-        print(f"✅ 이메일 발송 완료: {today}", flush=True)
-
-    except smtplib.SMTPAuthenticationError:
-        print("❌ Gmail 인증 실패: 계정 및 앱 비밀번호 확인", flush=True)
-        raise
-
-    except smtplib.SMTPServerDisconnected:
-        print("❌ SMTP 서버 연결이 예기치 않게 종료됨", flush=True)
-        raise
-
-    except Exception as e:
-        print(f"❌ 이메일 발송 오류: {type(e).__name__}", flush=True)
-        raise
+    return msg
 
 
 def main():
-    print("🔍 Psychology Today RSS 기사 수집 중...")
-    articles = fetch_pt_articles()
-
-    print("📋 사용한 기사 목록 확인 중...")
-    used_urls = load_used_articles()
-    unused_articles = filter_unused_articles(articles, used_urls)
-
-    if not unused_articles:
-        print("⚠️ 새로운 기사가 없습니다. 다음 실행을 기다려주세요.")
-        return
-
-    print("✍️ Claude로 블로그 글 작성 중...")
-    result = select_and_write_blog(unused_articles)
-
-    print("📧 이메일 발송 중...")
-    send_email(result)
-
-    print("💾 사용 기록 저장 중...")
-    save_used_article(result["url"])
+    mail = GmailDelivery.from_environment()
+    store = DeliveryStore()
+    run_delivery(
+        store, mail, fetch_pt_articles, select_and_write_blog, build_email,
+        datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat(),
+    )
 
 
 if __name__ == "__main__":
-    main()
-
-
-
-
-if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        # Provider exceptions may contain credentials or request bodies.
+        print(f"작업 실패 ({type(exc).__name__}). README의 복구 절차를 확인하세요.", flush=True)
+        raise SystemExit(1)
