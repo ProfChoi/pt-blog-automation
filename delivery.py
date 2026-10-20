@@ -1,12 +1,13 @@
-"""Gmail HTTPS delivery with durable, fail-closed send checkpoints."""
-import base64
+"""Gmail SMTP delivery with durable, fail-closed send checkpoints."""
 import json
 import os
 from pathlib import Path
 import subprocess
 import uuid
+from email.policy import SMTP as SMTP_POLICY
 
-import requests
+import smtplib
+import ssl
 
 
 class DeliveryError(RuntimeError):
@@ -29,64 +30,85 @@ def required(name):
 
 
 class GmailDelivery:
-    def __init__(self, sender, recipient, client_id, client_secret, refresh_token):
+    def __init__(self, sender, recipient, password):
         self.sender = sender
         self.recipient = recipient
-        self.credentials = {
-            "client_id": client_id, "client_secret": client_secret,
-            "refresh_token": refresh_token, "grant_type": "refresh_token",
-        }
-        self.token = None
+        self.password = "".join(password.split())
+        if not self.password:
+            raise DeliveryError("GMAIL_APP_PASSWORD is empty")
 
     @classmethod
     def from_environment(cls):
-        return cls(*(required(name) for name in (
-            "GMAIL_ADDRESS", "RECIPIENT_EMAIL", "GMAIL_CLIENT_ID",
-            "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN",
-        )))
+        return cls(required("GMAIL_ADDRESS"), required("RECIPIENT_EMAIL"),
+                   required("GMAIL_APP_PASSWORD"))
+
+    @staticmethod
+    def close(server):
+        # A QUIT failure after a successful DATA reply must not cause a resend.
+        if server is not None:
+            try:
+                server.quit()
+            except (smtplib.SMTPException, OSError):
+                try:
+                    server.close()
+                except OSError:
+                    pass
+
+    def connect(self):
+        # Switching ports is safe here: no MAIL/RCPT/DATA has been sent yet.
+        for port in (587, 465):
+            server = None
+            stage = "connect"
+            try:
+                context = ssl.create_default_context()
+                if port == 587:
+                    server = smtplib.SMTP("smtp.gmail.com", port, timeout=30)
+                    stage = "STARTTLS"
+                    server.ehlo()
+                    server.starttls(context=context)
+                    server.ehlo()
+                else:
+                    server = smtplib.SMTP_SSL("smtp.gmail.com", port, timeout=30, context=context)
+                    server.ehlo()
+                stage = "login"
+                server.login(self.sender, self.password, initial_response_ok=False)
+                return server
+            except smtplib.SMTPAuthenticationError:
+                self.close(server)
+                print(f"SMTP {port}: 앱 비밀번호 인증 거절. 계정과 Secret을 확인하세요.", flush=True)
+                raise RejectedDelivery("SMTP authentication rejected") from None
+            except (smtplib.SMTPException, OSError):
+                self.close(server)
+                print(f"SMTP {port}: {stage} 단계 연결 실패 (비밀값 생략)", flush=True)
+        raise RejectedDelivery("SMTP connection/authentication unavailable on both ports")
 
     def authenticate(self):
-        try:
-            response = requests.post(
-                "https://oauth2.googleapis.com/token", data=self.credentials,
-                timeout=(10, 30), allow_redirects=False,
-            )
-            if response.status_code != 200:
-                raise DeliveryError("Gmail OAuth configuration rejected")
-            self.token = response.json()["access_token"]
-            if not isinstance(self.token, str) or not self.token:
-                raise ValueError("Empty token")
-        except (requests.RequestException, ValueError, KeyError):
-            raise DeliveryError("Gmail OAuth authentication failed") from None
-        print("Gmail OAuth 인증 성공", flush=True)
+        server = self.connect()
+        self.close(server)
+        print("SMTP 인증 확인 성공 (메일 발송 없음)", flush=True)
 
     def send(self, message):
-        if not self.token:
-            raise DeliveryError("Authenticate before sending")
+        # Fresh connection avoids an idle SMTP timeout while Claude drafts.
+        server = self.connect()
         try:
-            response = requests.post(
-                "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-                headers={"Authorization": f"Bearer {self.token}"},
-                json={"raw": base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")},
-                timeout=(10, 60), allow_redirects=False,
+            refused = server.sendmail(
+                self.sender, [self.recipient], message.as_bytes(policy=SMTP_POLICY),
             )
-        except requests.RequestException:
-            raise UncertainDelivery("Gmail response lost; inspect Sent mail") from None
-        if response.status_code in (400, 401, 403, 404, 413, 429):
-            raise RejectedDelivery(f"Gmail rejected send: HTTP {response.status_code}")
-        if response.status_code != 200:
-            raise UncertainDelivery("Unexpected Gmail response; inspect Sent mail")
-        try:
-            message_id = response.json()["id"]
-            if not isinstance(message_id, str) or not message_id:
-                raise ValueError("Empty message id")
-            return message_id
-        except (ValueError, KeyError):
-            raise UncertainDelivery("Gmail acknowledgement incomplete") from None
+            if refused:
+                raise RejectedDelivery("SMTP recipient rejected")
+            return "smtp-accepted"
+        except (smtplib.SMTPSenderRefused, smtplib.SMTPRecipientsRefused,
+                smtplib.SMTPDataError, smtplib.SMTPNotSupportedError):
+            raise RejectedDelivery("SMTP explicitly rejected message") from None
+        except (smtplib.SMTPException, OSError):
+            # Never fall back or retry after DATA might have been accepted.
+            raise UncertainDelivery("SMTP send result unknown; inspect Sent mail") from None
+        finally:
+            self.close(server)
 
 
 class DeliveryStore:
-    """Metadata only: drafts, addresses and OAuth credentials never enter Git."""
+    """Metadata only: drafts, addresses and credentials never enter Git."""
     state_path = Path("delivery_state.json")
     used_path = Path("used_articles.txt")
 
@@ -161,7 +183,7 @@ def run_delivery(store, mail, fetch, write, build_email, today):
            for row in rows.values()):
         print("오늘 초안은 이미 Gmail에 접수되었습니다. 추가 발송하지 않습니다.", flush=True)
         return
-    # Check OAuth before spending Claude credits or changing article history.
+    # Check SMTP credentials before spending Claude credits or changing article history.
     mail.authenticate()
     if pending:
         record = pending[0]
@@ -185,7 +207,7 @@ def run_delivery(store, mail, fetch, write, build_email, today):
     record["status"] = "sending"
     store.checkpoint()
     try:
-        gmail_id = mail.send(message)
+        acceptance = mail.send(message)
     except RejectedDelivery:
         record["status"] = "prepared"
         store.checkpoint()
@@ -193,6 +215,6 @@ def run_delivery(store, mail, fetch, write, build_email, today):
     # Timeouts, termination or unknown errors leave remote state "sending".
     record["status"] = "sent"
     record["sent_date"] = today
-    record["gmail_id"] = gmail_id
+    record["acceptance"] = acceptance
     store.checkpoint()
     print("Gmail 접수 및 사용 기록 저장 완료", flush=True)

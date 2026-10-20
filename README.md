@@ -1,64 +1,54 @@
 # Psychology Today 초안 자동화
 
 Psychology Today RSS의 최신 20개 중 미사용 기사를 Claude가 선정하고, 기존 문체 예시와
-요일별 주제에 맞춰 한국어 1,200~1,500자 초안을 작성하여 Gmail API로 전달합니다.
+요일별 주제에 맞춰 한국어 1,200~1,500자 초안을 작성하여 기존 Gmail SMTP와 앱 비밀번호로 전달합니다.
 기존 모델(`claude-sonnet-4-6`), 선정 방식, 프롬프트, 원문 추출 및 제목 기반 대체 작성은 유지합니다.
 일정은 **화·목·일 한국시간 08:30**입니다. 기존 cron은 그대로이며 잘못된 주석만 바로잡았습니다.
 
 ## 확인한 문제와 수정
 
-- 기존 스크립트 끝의 `main()` 호출이 두 번 있어 성공한 실행에서 두 통 발송될 수 있었습니다.
-- 제공된 실행 화면에서는 STARTTLS 성공 후 `server.login()`에서
-  `SMTPServerDisconnected`가 발생했습니다. 이것만으로 비밀번호 오류나 Google 차단 원인을
-  확정할 수 없습니다. 새 구현은 SMTP 465/587 및 앱 비밀번호 의존성을 없애고 HTTPS Gmail API를 사용합니다.
-- 기존 코드는 이미 이메일 함수 반환 **후** 사용 기록을 추가했지만, Git push 전에 종료되거나
-  별도 실행이 겹치면 중복 발송될 수 있었습니다.
-- 이제 발송 전 상태를 원격 저장하고, Gmail의 성공 응답 후에만 사용 기록을 저장합니다.
-  OAuth 인증부터 확인하므로 잘못된 Gmail 설정 때문에 Claude 호출 비용이 먼저 발생하지 않습니다.
+비밀번호 변경 전 정상 작동하던 SMTP 방식을 유지합니다. **Gmail API/OAuth 설정은 필요 없습니다.**
+Google 계정 비밀번호를 변경하면 기존 앱 비밀번호가 폐기됩니다. 마지막 계정 비밀번호 변경
+이후 발급한 앱 비밀번호를 동일 발신 계정의 GitHub Secret에 등록해야 합니다.
+앱 비밀번호를 다시 발급했는데도 연결이 끊긴 경우에는 실제 인증 검사 결과를 확인해야 하며,
+코드 수정만으로 계정 인증 문제가 해결됐다고 단정할 수 없습니다.
 
-## 최초 설정 (한 번)
+- 기존 스크립트 끝의 중복 `main()` 호출을 제거했습니다.
+- STARTTLS 587로 인증하고, 메일 전송 전 연결 실패에 한해 SSL 465를 시도합니다.
+  명시적인 비밀번호 인증 거절은 바로 중단합니다. `initial_response_ok=False`로
+  서버의 인증 challenge에 응답하는 방식을 사용합니다. 이것이 계정 오류를 해결한다는 보장은 없습니다.
+- Claude 호출 전 SMTP 인증만 확인하고 연결을 닫습니다. 초안 생성 후 새 연결로 발송합니다.
+- 발송 전 상태를 원격 저장하고, SMTP 서버의 접수 성공 후에만 사용 기록을 저장합니다.
+  전송 중 연결 유실은 자동 재발송하지 않습니다. 성공 후 QUIT 단계의 연결 종료는 발송 실패로 바꾸지 않습니다.
+- 기사 선정 프롬프트, 문체 예시, 작성 조건과 기존 일정은 유지합니다.
 
-기존 `CLAUDE_API_KEY`, `GMAIL_ADDRESS`, `RECIPIENT_EMAIL` Secrets는 유지합니다.
-`GMAIL_APP_PASSWORD`는 더 이상 사용하지 않습니다. 값을 채팅이나 코드에 붙여 넣지 마세요.
+## 기존 Secrets 확인 및 실행
 
-1. [Google Cloud Console](https://console.cloud.google.com/)에서 본인 소유 프로젝트를 만들거나
-   선택하고 **Gmail API**를 사용 설정합니다.
-2. Google Auth Platform의 Branding/Audience/Data Access를 설정합니다. 개인 Gmail은 External로
-   구성하고 본인을 테스트 사용자로 추가합니다. 요청 범위는
-   `https://www.googleapis.com/auth/gmail.send` 하나입니다.
-3. 정기 운영 전 Audience의 게시 상태를 **In production**으로 전환하고 그 후 인증하세요.
-   External/Testing 상태의 Gmail refresh token은 보통 **7일 후 만료**됩니다.
-   개인 사용 앱의 검증 예외 및 Workspace 관리자 정책은 계정에 따라 다르므로
-   Google 화면의 안내를 따르세요. Production도 영구 토큰을 보장하지 않습니다.
-4. OAuth client를 **Desktop app**으로 생성하고 JSON을 내려받습니다.
-   저장소 밖에 보관하거나 `client_secret*.json` 이름을 사용하세요(버전 관리 제외).
-5. 자신의 PC에서 GitHub CLI(`gh`)로 저장소 수정 권한이 있는 계정에 로그인하고 실행합니다.
+새 Google Cloud 프로젝트나 OAuth 토큰은 필요하지 않습니다. 다음 기존 Secrets만 사용합니다.
 
-   ```powershell
-   gh auth login
-   python -m venv .venv
-   .venv\Scripts\python -m pip install "google-auth-oauthlib>=1.2,<2"
-   .venv\Scripts\python tools/setup_gmail_oauth.py --client-secrets "C:\path\client_secret.json"
-   ```
+| Secret | 내용 |
+| --- | --- |
+| `CLAUDE_API_KEY` | 기존 Claude API 키 |
+| `GMAIL_ADDRESS` | 앱 비밀번호를 발급한 발신 Gmail 계정 |
+| `GMAIL_APP_PASSWORD` | 마지막 계정 비밀번호 변경 이후 발급한 앱 비밀번호 |
+| `RECIPIENT_EMAIL` | 수신 주소 한 개 |
 
-   브라우저에서 반드시 **GMAIL_ADDRESS에 해당하는 발신 계정**을 선택하세요.
-   Linux/macOS에서는 `.venv\Scripts\python` 대신 `.venv/bin/python`을 사용합니다.
-   도구는 토큰을 화면이나 파일에 출력하지 않고 아래 세 값을 GitHub Actions Secrets에
-   표준입력으로 직접 저장합니다. 일부 업로드가 실패하면 GitHub 권한을 확인하고 다시 실행하세요.
+1. [Google 앱 비밀번호](https://myaccount.google.com/apppasswords)에서 발신 계정이 맞는지 확인합니다.
+   이미 마지막 비밀번호 변경 이후 새 앱 비밀번호를 발급했다면 무조건 다시 발급할 필요는 없습니다.
+2. GitHub 저장소 Settings → Secrets and variables → Actions에서 `GMAIL_APP_PASSWORD`를 새 값으로
+   저장했는지 확인합니다. 일반 Google 로그인 비밀번호가 아닙니다. 값을 채팅이나 코드에 붙여 넣지 마세요.
+3. 수정 PR을 기본 브랜치에 반영합니다. Settings → Actions → General에서 `contents: write`가
+   허용되어야 합니다. 브랜치 보호 규칙이 상태 커밋을 금지하면 실제 발송 전에 안전하게 실패합니다.
+4. Actions → **Daily PT Blog → Run workflow**에서 **check_smtp**를 체크하여 실행합니다.
+   이 모드는 Claude 호출·메일 발송·기사 기록 변경 없이 SMTP 인증만 검사합니다.
+   성공 로그: `SMTP 인증 확인 성공 (메일 발송 없음)`.
+5. 인증 검사에 성공하면 **check_smtp**를 해제하고 실행합니다. 실제 초안 한 통을 보냅니다.
+   Gmail 보낸편지함/수신함, `delivery_state.json`의 `sent`, `used_articles.txt`의 URL을 확인합니다.
+   같은 날 다시 실행해도 추가 발송하지 않습니다.
 
-   | Secret | 내용 |
-   | --- | --- |
-   | `GMAIL_CLIENT_ID` | Desktop OAuth client ID |
-   | `GMAIL_CLIENT_SECRET` | 해당 client secret |
-   | `GMAIL_REFRESH_TOKEN` | 발신 Gmail 사용자가 승인한 offline refresh token |
-
-6. 저장소 Settings → Actions → General에서 워크플로의 `contents: write` 권한이 허용되는지
-   확인하세요. 기본 브랜치 보호 규칙이 Actions의 상태 커밋을 금지하면 발송 전 안전하게
-   실패합니다. 조직 정책에 맞게 상태 커밋 권한을 마련한 뒤 실행하세요.
-7. 수정본을 기본 브랜치에 반영한 뒤 Actions → **Daily PT Blog → Run workflow**를 한 번 실행합니다.
-   성공 시 Gmail 보낸편지함, 수신함, `delivery_state.json`의 `sent`,
-   `used_articles.txt`의 해당 URL을 확인하세요. 이는 실제 초안 한 통을 발송합니다.
-   같은 날 다시 실행하면 추가 발송하지 않습니다. OAuth 설정만으로 실제 수신 성공이 검증되지는 않습니다.
+로그는 실패한 포트와 단계(connect/STARTTLS/login)를 보여주며 비밀번호·인증 전문은 출력하지 않습니다.
+양쪽 포트에서 login 단계 연결이 끊기면 계정/앱 비밀번호/Google 보안 알림 및 관리자 정책을 확인하세요.
+SMTP 디버그 로그는 인증값을 노출할 수 있으므로 켜지 마세요.
 
 ## 중복 방지와 실패 복구
 
@@ -70,16 +60,16 @@ Git 충돌은 강제 push나 자동 재발송으로 덮지 않습니다.
 | --- | --- | --- |
 | `prepared` | 선정 완료, 아직 발송 안 됨 또는 Google의 명시적 거절 | 같은 기사로 초안을 다시 작성하여 시도 |
 | `sending` | 발송 직전 원격 저장 완료, 결과 미확정 | 모든 자동 발송 중단, 수동 확인 필요 |
-| `sent` | Gmail 성공 응답과 ID를 확인했거나 운영자가 발송 확인 | 기사 사용 처리, 당일 추가 발송 차단 |
+| `sent` | SMTP 접수 성공을 확인했거나 운영자가 발송 확인 | 기사 사용 처리, 당일 추가 발송 차단 |
 
 초안 본문, 이메일 주소, 인증값은 공개 저장소에 저장하지 않습니다. 저장되는 것은 원문 기사
-메타데이터, 날짜, 상태, Message-ID 및 Gmail 접수 ID입니다. 실패 후 재작성 문장은 달라질 수 있지만
+메타데이터, 날짜, 상태, Message-ID 및 접수 확인 상태입니다. 실패 후 재작성 문장은 달라질 수 있지만
 선택한 기사는 유지합니다. 전날 미완료 건을 오늘 성공하면 오늘의 한 통으로 계산합니다.
 Gmail 접수 성공은 수신함 도착 보장이 아니므로 반송/스팸함은 별도 확인합니다.
 
 ### `sending` 상태에서 멈춘 경우
 
-Gmail의 전송 API는 이 구현에서 사용할 수 있는 멱등 키를 제공하지 않습니다. 동일 Message-ID도
+SMTP에는 이 구현에서 사용할 수 있는 멱등 키가 없습니다. 동일 Message-ID도
 자동 중복 제거를 보장하지 않습니다. 응답 유실·강제 취소·발송 후 Git push 실패는 성공인지
 실패인지 단정할 수 없으므로 **자동 재시도하지 않습니다**.
 
@@ -95,10 +85,9 @@ Gmail의 전송 API는 이 구현에서 사용할 수 있는 멱등 키를 제�
    단순히 검색 결과가 없다는 이유만으로 재시도하면 중복 위험이 있습니다.
    불확실하다면 `sending`을 유지하세요.
 
-OAuth 실패는 Google API 활성화, client ID/secret 조합, 계정 승인 및 refresh token 만료/취소를
-확인한 뒤 최초 인증 도구를 다시 실행합니다. HTTP 400/401/403/404/413/429는 명시적 거절로 처리하며
-다음 워크플로에서 재시도합니다. 5xx, 시간 초과, 비정상 응답은 미확정 상태로 남깁니다.
-실패 로그는 오류 종류만 출력하고 제공자 응답 본문·토큰은 출력하지 않습니다.
+인증 실패는 위 Secrets와 계정을 확인한 뒤 `check_smtp`로 다시 검사합니다.
+명시적 인증/수신자/메시지 거절은 다음 실행에서 재시도할 수 있습니다.
+메시지 전송 중 시간 초과나 연결 유실은 미확정 상태로 남깁니다.
 
 기존 `used_articles.txt`는 유지합니다. 이력 전체를 삭제하면 과거 기사 중복 가능성이 생깁니다.
 새 ledger 도입 이전의 발송 성공 여부를 소급하여 알 수는 없습니다.
@@ -116,6 +105,5 @@ OAuth 실패는 Google API 활성화, client ID/secret 조합, 계정 승인 및
 PR의 **Tests** 워크플로는 비밀값 없이 같은 검증을 수행합니다.
 
 공식 문서:
-[Gmail 메시지 발송](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send),
-[Desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app),
-[refresh token 만료 조건](https://developers.google.com/identity/protocols/oauth2#expiration).
+[비밀번호 변경 시 앱 비밀번호 폐기](https://support.google.com/accounts/answer/185833?hl=ko),
+[Python SMTP](https://docs.python.org/3/library/smtplib.html).

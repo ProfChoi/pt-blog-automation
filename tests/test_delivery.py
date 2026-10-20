@@ -1,5 +1,5 @@
 import ast
-import base64
+import smtplib
 import copy
 from email import message_from_bytes
 from pathlib import Path
@@ -154,53 +154,78 @@ class PipelineTests(unittest.TestCase):
 
 class GmailTests(unittest.TestCase):
     def setUp(self):
-        self.mail = GmailDelivery("sender@example.org", "reader@example.org", "id", "secret", "refresh")
-        self.mail.token = "test-token"
+        self.mail = GmailDelivery("sender@example.org", "reader@example.org", "abcd efgh ijkl mnop")
         self.message = blog.build_email(RESULT, self.mail.sender, self.mail.recipient, "<test@example.org>")
 
-    @patch("delivery.requests.post")
-    def test_utf8_mime_and_api_acceptance(self, post):
-        post.return_value = Mock(status_code=200)
-        post.return_value.json.return_value = {"id": "accepted"}
-        self.assertEqual(self.mail.send(self.message), "accepted")
-        raw = post.call_args.kwargs["json"]["raw"]
-        decoded = message_from_bytes(base64.urlsafe_b64decode(raw))
+    @patch("delivery.smtplib.SMTP")
+    def test_utf8_mime_and_smtp_acceptance(self, smtp):
+        server = smtp.return_value
+        server.sendmail.return_value = {}
+        self.assertEqual(self.mail.send(self.message), "smtp-accepted")
+        decoded = message_from_bytes(server.sendmail.call_args.args[2])
         self.assertEqual(decoded["Message-ID"], "<test@example.org>")
         self.assertIn("한글 초안", decoded.get_payload()[0].get_payload(decode=True).decode("utf-8"))
-        self.assertEqual(post.call_count, 1)
-        self.assertFalse(post.call_args.kwargs["allow_redirects"])
+        server.login.assert_called_once_with(self.mail.sender, "abcdefghijklmnop", initial_response_ok=False)
+        server.starttls.assert_called_once()
+        server.quit.assert_called_once()
 
-    @patch("delivery.requests.post")
-    def test_rejections_vs_uncertain_responses_no_http_retries(self, post):
-        for code in (400, 401, 403, 404, 413, 429, 500, 502, 503, 302):
-            with self.subTest(code=code):
-                post.reset_mock()
-                post.return_value = Mock(status_code=code)
-                expected = RejectedDelivery if code in (400, 401, 403, 404, 413, 429) else UncertainDelivery
-                with self.assertRaises(expected):
-                    self.mail.send(self.message)
-                self.assertEqual(post.call_count, 1)
+    @patch("delivery.smtplib.SMTP")
+    def test_authentication_probe_sends_no_message(self, smtp):
+        self.mail.authenticate()
+        smtp.return_value.sendmail.assert_not_called()
+        smtp.return_value.quit.assert_called_once()
 
-    @patch("delivery.requests.post", side_effect=requests.Timeout("sensitive body"))
-    def test_lost_response_is_sanitized(self, post):
+    @patch("delivery.smtplib.SMTP_SSL")
+    @patch("delivery.smtplib.SMTP")
+    def test_login_disconnect_fallback_before_send(self, smtp, ssl_smtp):
+        smtp.return_value.login.side_effect = smtplib.SMTPServerDisconnected("private detail")
+        ssl_smtp.return_value.sendmail.return_value = {}
+        self.assertEqual(self.mail.send(self.message), "smtp-accepted")
+        smtp.return_value.sendmail.assert_not_called()
+        ssl_smtp.return_value.sendmail.assert_called_once()
+
+    @patch("delivery.smtplib.SMTP_SSL")
+    @patch("delivery.smtplib.SMTP")
+    def test_password_rejection_does_not_try_another_port(self, smtp, ssl_smtp):
+        smtp.return_value.login.side_effect = smtplib.SMTPAuthenticationError(535, b"private detail")
+        with self.assertRaises(RejectedDelivery) as error:
+            self.mail.send(self.message)
+        self.assertNotIn("private", str(error.exception))
+        ssl_smtp.assert_not_called()
+        smtp.return_value.sendmail.assert_not_called()
+
+    @patch("delivery.smtplib.SMTP_SSL")
+    @patch("delivery.smtplib.SMTP")
+    def test_send_disconnect_is_uncertain_and_never_falls_back(self, smtp, ssl_smtp):
+        smtp.return_value.sendmail.side_effect = smtplib.SMTPServerDisconnected("private detail")
         with self.assertRaises(UncertainDelivery) as error:
             self.mail.send(self.message)
-        self.assertNotIn("sensitive", str(error.exception))
-        self.assertEqual(post.call_count, 1)
+        self.assertNotIn("private", str(error.exception))
+        ssl_smtp.assert_not_called()
+        smtp.return_value.sendmail.assert_called_once()
 
-    @patch("delivery.requests.post")
-    def test_success_without_id_is_uncertain(self, post):
-        post.return_value = Mock(status_code=200)
-        post.return_value.json.return_value = {}
-        with self.assertRaises(UncertainDelivery):
+    @patch("delivery.smtplib.SMTP")
+    def test_explicit_data_rejection_is_retryable(self, smtp):
+        smtp.return_value.sendmail.side_effect = smtplib.SMTPDataError(550, b"rejected")
+        with self.assertRaises(RejectedDelivery):
             self.mail.send(self.message)
 
-    @patch("delivery.requests.post")
-    def test_oauth_rejection_does_not_leak_body(self, post):
-        post.return_value = Mock(status_code=400, text="secret refresh-token")
-        with self.assertRaises(DeliveryError) as error:
+    @patch("delivery.smtplib.SMTP")
+    def test_quit_disconnect_after_success_remains_success(self, smtp):
+        smtp.return_value.sendmail.return_value = {}
+        smtp.return_value.quit.side_effect = smtplib.SMTPServerDisconnected("closed")
+        self.assertEqual(self.mail.send(self.message), "smtp-accepted")
+        smtp.return_value.close.assert_called_once()
+
+    @patch("delivery.smtplib.SMTP_SSL")
+    @patch("delivery.smtplib.SMTP")
+    def test_both_ports_fail_before_send(self, smtp, ssl_smtp):
+        smtp.return_value.login.side_effect = smtplib.SMTPServerDisconnected("closed")
+        ssl_smtp.return_value.login.side_effect = smtplib.SMTPServerDisconnected("closed")
+        with self.assertRaises(RejectedDelivery):
             self.mail.authenticate()
-        self.assertNotIn("secret", str(error.exception))
+        smtp.return_value.sendmail.assert_not_called()
+        ssl_smtp.return_value.sendmail.assert_not_called()
 
 
 class SourceTests(unittest.TestCase):
