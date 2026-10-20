@@ -221,12 +221,24 @@ password = GMAIL_APP_PASSWORD.replace(" ", "").strip()
 try:
     context = ssl.create_default_context()
 
-    with smtplib.SMTP_SSL(
-        "smtp.gmail.com",
-        465,
-        context=context,
-        timeout=30
+try:
+    with smtplib.SMTP(
+        "smtp.gmail.com", 587, timeout=30
     ) as server:
+        server.ehlo()
+        server.starttls(context=ssl.create_default_context())
+        server.ehlo()
+        print("✅ SMTP STARTTLS 연결 성공")
+
+        server.login(GMAIL_ADDRESS.strip(), password)
+        print("✅ Gmail 인증 성공")
+
+        server.sendmail(
+            GMAIL_ADDRESS,
+            RECIPIENT_EMAIL,
+            msg.as_string()
+        )
+        print("✅ 이메일 발송 성공")
         print("✅ SMTP 연결 성공")
         server.login(GMAIL_ADDRESS.strip(), password)
         print("✅ Gmail 인증 성공")
