@@ -1,4 +1,0 @@
-requests>=2.32.4,<3
-beautifulsoup4>=4.13,<5
-anthropic>=0.49,<1
-tzdata>=2025.2
