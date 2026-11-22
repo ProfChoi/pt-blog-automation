@@ -40,7 +40,7 @@ class BlogTests(unittest.TestCase):
     def test_valid_plain_draft(self):
         title = "떠나는 리더가 조직에 남기는 마지막 질문"
         paragraph = "리더가 조직을 떠나는 순간에는 개인의 결정보다 남겨진 관계의 변화가 더 중요할 수 있습니다. "
-        draft = title + "\n\n" + (paragraph * 24)
+        draft = title + "\n\n" + (paragraph * 45)
         self.assertEqual(blog.draft_issues(draft), [])
 
     def test_markdown_is_rejected(self):
