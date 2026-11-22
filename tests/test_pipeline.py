@@ -1,6 +1,7 @@
 """Offline regression tests: no real OpenAI, HTTP, or Gmail calls."""
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+from types import SimpleNamespace
 
 import fetch_and_write as blog
 
@@ -15,8 +16,39 @@ class FakeResponse:
 
 
 class BlogTests(unittest.TestCase):
-    def test_model_is_gpt_only(self):
-        self.assertEqual(blog.MODEL, "gpt-6.1-terra")
+    def test_model_routing(self):
+        self.assertEqual(blog.SELECTION_MODEL, "gpt-6.1-terra")
+        self.assertEqual(blog.WRITING_MODEL, "gpt-6.2-sol")
+        self.assertEqual(blog.MODEL_PRICING[blog.SELECTION_MODEL]["output"], 5.0)
+        self.assertEqual(blog.MODEL_PRICING[blog.WRITING_MODEL]["output"], 10.0)
+
+    def test_article_selection_uses_terra_no_reasoning(self):
+        client = MagicMock()
+        client.responses.create.return_value = SimpleNamespace(output_text="1", usage=None)
+        article = {"title": "Handling Stress", "desc": "Psychology Today psychology article"}
+        chosen = blog.rank_articles(client, [article])
+        self.assertEqual(chosen, [0])
+        args = client.responses.create.call_args.kwargs
+        self.assertEqual(args["model"], blog.SELECTION_MODEL)
+        self.assertEqual(args["reasoning"], {"effort": "none"})
+
+    def test_essay_writing_uses_sol_medium_reasoning(self):
+        client = MagicMock()
+        client.responses.create.return_value = SimpleNamespace(output_text="차분한 마음의 이야기\n\n본문입니다.", usage=None)
+        result = blog.call_writer(client, "예시 기사")
+        self.assertTrue(result.startswith("차분한"))
+        args = client.responses.create.call_args.kwargs
+        self.assertEqual(args["model"], blog.WRITING_MODEL)
+        self.assertEqual(args["reasoning"], {"effort": "medium"})
+        self.assertIn("심리학 에세이", args["instructions"])
+
+    def test_usage_is_tracked_by_model(self):
+        usage = SimpleNamespace(input_tokens=1000, output_tokens=250, input_tokens_details=SimpleNamespace(cached_tokens=100))
+        record = SimpleNamespace(usage=usage)
+        with patch.dict(blog.TEXT_USAGE, {blog.WRITING_MODEL: {"input": 0, "output": 0, "cached_input": 0, "calls": 0}}):
+            blog.record_text_usage(record, blog.WRITING_MODEL)
+            self.assertEqual(blog.TEXT_USAGE[blog.WRITING_MODEL]["input"], 1000)
+            self.assertEqual(blog.TEXT_USAGE[blog.WRITING_MODEL]["calls"], 1)
 
     def test_pt_url_restriction(self):
         self.assertTrue(blog.is_pt_url("https://www.psychologytoday.com/us/blog/example"))
@@ -81,6 +113,7 @@ class BlogTests(unittest.TestCase):
         self.assertIn("출처: Psychology Today", body)
         self.assertIn("원문 URL: https://www.psychologytoday.com", body)
         self.assertNotIn("Claude", body)
+        self.assertIn("GPT-6.2 Sol", body)
         self.assertNotIn("<html>", body)
 
     def test_only_one_main_guard(self):
