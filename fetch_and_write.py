@@ -66,7 +66,7 @@ def make_client():
     key = os.getenv("OPENAI_API_KEY", "").strip()
     if not key:
         raise RuntimeError("OPENAI_API_KEY가 설정되지 않았습니다.")
-    return OpenAI(api_key=key, timeout=100, max_retries=2)
+    return OpenAI(api_key=key, timeout=180, max_retries=2)
 
 
 def load_used_articles():
