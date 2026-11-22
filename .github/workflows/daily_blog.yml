@@ -6,10 +6,10 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "미리보기만 저장하기 (이메일 발송/기사기록 수정 안 함)"
+        description: "체크하면 미리보기만 저장합니다. 체크하지 않으면 이메일로 발송합니다."
         type: boolean
         required: true
-        default: true
+        default: false
 
 permissions:
   contents: write
