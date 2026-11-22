@@ -79,9 +79,9 @@ class BlogTests(unittest.TestCase):
                 blog.send_email(article, "심리학 설명\n\n심리학 칼럼 본문", jpeg)
                 msg = smtp.return_value.__enter__.return_value.send_message.call_args.args[0]
         self.assertEqual(msg.get_content_type(), "multipart/mixed")
-        self.assertEqual(len(msg.get_attachments()), 1)
-        self.assertEqual(msg.get_attachments()[0].get_content_type(), "image/jpeg")
-        self.assertEqual(msg.get_attachments()[0].get_filename(), "psychology_today_cover.jpg")
+        self.assertEqual(len(list(msg.iter_attachments())), 1)
+        self.assertEqual(list(msg.iter_attachments())[0].get_content_type(), "image/jpeg")
+        self.assertEqual(list(msg.iter_attachments())[0].get_filename(), "psychology_today_cover.jpg")
         self.assertEqual(msg.get_body(preferencelist=("plain",)).get_content_type(), "text/plain")
 
     def test_markdown_is_rejected(self):
