@@ -1,10 +1,11 @@
 # Psychology Today 블로그 자동화
 
-Psychology Today RSS에서 미사용 기사를 선별하고, 확인된 기사 본문을 GPT-6.1 Terra로 해설한 뒤 한국어 블로그 초안을 이메일로 보냅니다.
+Psychology Today RSS에서 미사용 기사를 선별하고, 확인된 기사 본문을 GPT-6.2 Sol로 심리학 에세이 형식으로 집필한 뒤 한국어 블로그 초안을 이메일로 보냅니다.
 
 ## 운영 개요
-- 모델: OpenAI Responses API / gpt-6.1-terra
-- 원고: 한국어 대중 심리학 해설형, 본문 공백 포함 900~1,200자(권장 1,000~1,100자)
+- 기사 선별 모델: OpenAI Responses API / gpt-6.1-terra (reasoning none)
+- 에세이 작성 모델: OpenAI Responses API / gpt-6.2-sol (reasoning medium)
+- 원고: 한국어 심리학 에세이형, 본문 공백 포함 900~1,200자(권장 1,000~1,100자)
 - 이메일: 순수 텍스트(text/plain; UTF-8)만 발송, 첨부파일 없음, 1회 실행당 최대 한 통
 - 이미지 API를 호출하지 않아 이미지 생성 비용이 발생하지 않음
 - 정기 실행: 한국시간 일요일·화요일·목요일 오전 08:30 (UTC 토·월·수 23:30)
@@ -38,5 +39,6 @@ Claude API는 더 이상 사용하지 않습니다. CLAUDE_API_KEY가 남아 있
 - 파이프라인: fetch_and_write.py
 - 오프라인 검사: python -m unittest discover -s tests -v
 - 필요 패키지: openai (v2), requests, beautifulsoup4
-- 텍스트 모델 설정은 fetch_and_write.py의 MODEL에 정의되어 있습니다.
-- 텍스트 API 사용량(기사 선별 + 본문 생성 + 필요시 재작성)은 GitHub Actions 로그에서 확인할 수 있습니다. 실제 비용은 https://platform.openai.com/usage 에서 확인하세요.
+- 모델 설정은 fetch_and_write.py의 SELECTION_MODEL 및 WRITING_MODEL에 정의되어 있습니다.
+- 텍스트 API 사용량(기사 선별 + 에세이 작성 + 필요시 재작성)은 모델별로 GitHub Actions 로그에서 확인할 수 있습니다. 실제 비용은 https://platform.openai.com/usage 에서 확인하세요.
+- `OPENAI_API_KEY`는 모델별로 별도 발급받지 않습니다. 같은 프로젝트 키로 Terra와 Sol을 호출합니다. 프로젝트의 모델 접근 권한 및 API 사용 한도를 확인하세요.
