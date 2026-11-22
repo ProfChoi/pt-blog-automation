@@ -21,7 +21,7 @@ Psychology Today RSS에서 미사용 기사를 선별하고, 확인된 기사 �
 Claude API는 더 이상 사용하지 않습니다. CLAUDE_API_KEY가 남아 있다면 저장소 관리자 본인이 GitHub Secrets에서 삭제하고, 더 이상 필요 없을 경우 Anthropic 콘솔에서도 키를 폐기하세요. 이 저장소에는 키의 실제 값을 작성하지 마세요.
 
 ## 안전한 첫 테스트
-1. Actions에서 Daily PT Blog (GPT-6.1 Terra)를 선택합니다.
+1. Actions에서 Daily PT Blog (GPT-6.2 Sol Essays)를 선택합니다.
 2. Run workflow를 클릭합니다. dry_run은 기본 false이므로 새로운 기사 한 편의 초안이 이메일로 발송됩니다.
 3. 이메일을 보내지 않고 확인만 하려면 dry_run을 체크(true)한 뒤 실행합니다. 이때 실행 기록의 Artifacts > pt-blog-preview에서 draft.txt를 확인할 수 있습니다.
 
