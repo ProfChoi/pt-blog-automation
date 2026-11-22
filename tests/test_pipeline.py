@@ -49,18 +49,18 @@ class BlogTests(unittest.TestCase):
         self.assertEqual(blog.MIN_BLOG_CHARS, 1100)
         self.assertEqual(blog.MAX_BLOG_CHARS, 1650)
         title = "떠나는 리더가 조직에 남기는 마지막 질문"
-        short = title + "\\n\\n" + "심리학 설명입니다. " * 50
-        long = title + "\\n\\n" + "심리학 설명입니다. " * 250
+        short = title + "\n\n" + "심리학 설명입니다. " * 50
+        long = title + "\n\n" + "심리학 설명입니다. " * 250
         self.assertTrue(any("1100" in s for s in blog.draft_issues(short)))
         self.assertTrue(any("1650" in s for s in blog.draft_issues(long)))
 
     def test_image_generated_as_jpeg(self):
-        jpg = b"\\xff\\xd8\\xff" + b"0" * 1300
+        jpg = b"\xff\xd8\xff" + b"0" * 1300
         data = SimpleNamespace(b64_json=base64.b64encode(jpg).decode("ascii"))
         fake_client = MagicMock()
         fake_client.images.generate.return_value = SimpleNamespace(data=[data], usage=None)
         article = {"title": "A Psychology Today Article"}
-        image = blog.generate_cover_image(fake_client, article, "심리학적인 질문\\n\\n심리학적 해설입니다.")
+        image = blog.generate_cover_image(fake_client, article, "심리학적인 질문\n\n심리학적 해설입니다.")
         self.assertEqual(image, jpg)
         args = fake_client.images.generate.call_args.kwargs
         self.assertEqual(args["model"], "gpt-image-2.5-flare")
@@ -69,14 +69,14 @@ class BlogTests(unittest.TestCase):
 
     def test_email_mime_plain_text_plus_jpeg_attachment(self):
         article = {"title": "Psychology Today Article", "url": "https://www.psychologytoday.com/us/blog/test"}
-        jpeg = b"\\xff\\xd8\\xff" + b"0" * 1300
+        jpeg = b"\xff\xd8\xff" + b"0" * 1300
         with patch.dict(blog.os.environ, {
             "GMAIL_ADDRESS": "sender@example.com",
             "GMAIL_APP_PASSWORD": "testpassword",
             "RECIPIENT_EMAIL": "recipient@example.com",
         }):
             with patch.object(blog.smtplib, "SMTP") as smtp:
-                blog.send_email(article, "심리학 설명\\n\\n심리학 칼럼 본문", jpeg)
+                blog.send_email(article, "심리학 설명\n\n심리학 칼럼 본문", jpeg)
                 msg = smtp.return_value.__enter__.return_value.send_message.call_args.args[0]
         self.assertEqual(msg.get_content_type(), "multipart/mixed")
         self.assertEqual(len(msg.get_attachments()), 1)
