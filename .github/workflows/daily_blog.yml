@@ -1,4 +1,4 @@
-name: Daily PT Blog (GPT-6.1 Terra)
+name: Daily PT Blog (GPT-6.2 Sol Essays)
 
 on:
   schedule:
@@ -38,7 +38,7 @@ jobs:
       - name: Run non-network unit tests
         run: python -m unittest discover -s tests -v
 
-      - name: Generate draft using GPT-6.1 Terra
+      - name: Rank with Terra and write essay with GPT-6.2 Sol
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
