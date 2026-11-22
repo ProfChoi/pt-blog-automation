@@ -63,8 +63,8 @@ class BlogTests(unittest.TestCase):
                 blog.send_email(article, "심리학 설명\n\n심리학 칼럼 본문")
                 msg = smtp.return_value.__enter__.return_value.send_message.call_args.args[0]
         self.assertEqual(msg.get_content_type(), "text/plain")
-        self.assertEqual(list(msg.iter_attachments()), [])
-        self.assertIn("심리학 칼럼 본문", msg.get_content())
+        self.assertFalse(msg.is_multipart())
+        self.assertIn("심리학 칼럼 본문", msg.get_payload(decode=True).decode("utf-8"))
         self.assertEqual(msg.get_content_charset(), "utf-8")
 
     def test_image_generation_is_removed(self):
