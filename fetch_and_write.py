@@ -17,8 +17,17 @@ import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
 
-MODEL = "gpt-6.1-terra"
-TEXT_USAGE = {"input": 0, "output": 0, "cached_input": 0, "calls": 0}
+SELECTION_MODEL = "gpt-6.1-terra"
+WRITING_MODEL = "gpt-6.2-sol"
+MODEL_PRICING = {
+    # Standard API token prices in USD per 1M tokens
+    SELECTION_MODEL: {"input": 1.0, "cached": 0.05, "output": 5.0},
+    WRITING_MODEL: {"input": 2.0, "cached": 0.10, "output": 10.0},
+}
+TEXT_USAGE = {
+    model: {"input": 0, "output": 0, "cached_input": 0, "calls": 0}
+    for model in MODEL_PRICING
+}
 RSS_URL = "https://www.psychologytoday.com/us/front/feed"
 USED_ARTICLES_FILE = Path("used_articles.txt")
 PREVIEW_FILE = Path("preview_output/draft.txt")
@@ -168,13 +177,13 @@ def day_theme():
 def rank_articles(client, articles):
     listing = "\n".join(f"{i+1}. {a['title']}: {a['desc']}" for i, a in enumerate(articles))
     result = client.responses.create(
-        model=MODEL,
+        model=SELECTION_MODEL,
         reasoning={"effort": "none"},
         max_output_tokens=120,
         instructions="기사 목록에서 적합한 기사 번호를 우선순위대로 최대 5개, 쉼표로 구분한 숫자만 답하세요.",
         input=f"주제: {day_theme()}\n기사 목록:\n{listing}",
     )
-    record_text_usage(result)
+    record_text_usage(result, SELECTION_MODEL)
     chosen = []
     for number in re.findall(r"\b\d+\b", result.output_text or ""):
         index = int(number) - 1
@@ -204,13 +213,13 @@ def draft_issues(text):
 
 def call_writer(client, prompt):
     result = client.responses.create(
-        model=MODEL,
-        reasoning={"effort": "low"},
+        model=WRITING_MODEL,
+        reasoning={"effort": "medium"},
         max_output_tokens=8000,
         instructions=WRITING_GUIDE,
         input=prompt,
     )
-    record_text_usage(result)
+    record_text_usage(result, WRITING_MODEL)
     draft = (result.output_text or "").strip()
     if not draft:
         raise RuntimeError("모델이 빈 원고를 반환했습니다.")
@@ -222,7 +231,7 @@ def write_blog(client, article, source):
         f"[원문 제목]\n{article['title']}\n\n"
         f"[주제 방향]\n{day_theme()}\n\n"
         f"[확인된 기사 본문]\n{source}\n\n"
-        "위 자료를 근거로 독립적인 한국어 대중 심리학 해설 칼럼을 작성하세요."
+        "위 자료를 근거로 독립적이고 자연스러운 한국어 심리학 에세이를 작성하세요."
     )
     draft = call_writer(client, prompt)
     problems = draft_issues(draft)
@@ -242,23 +251,37 @@ def write_blog(client, article, source):
 
 
 
-def record_text_usage(response):
+def record_text_usage(response, model):
     usage = getattr(response, "usage", None)
     if usage is None:
         return
-    TEXT_USAGE["calls"] += 1
-    TEXT_USAGE["input"] += int(getattr(usage, "input_tokens", 0) or 0)
-    TEXT_USAGE["output"] += int(getattr(usage, "output_tokens", 0) or 0)
+    counters = TEXT_USAGE[model]
+    counters["calls"] += 1
+    counters["input"] += int(getattr(usage, "input_tokens", 0) or 0)
+    counters["output"] += int(getattr(usage, "output_tokens", 0) or 0)
     details = getattr(usage, "input_tokens_details", None)
-    TEXT_USAGE["cached_input"] += int(getattr(details, "cached_tokens", 0) or 0)
+    counters["cached_input"] += int(getattr(details, "cached_tokens", 0) or 0)
 
 
 def print_usage_estimate():
-    total_input = TEXT_USAGE["input"]
-    cached = min(total_input, TEXT_USAGE["cached_input"])
-    output = TEXT_USAGE["output"]
-    text_cost = ((total_input - cached) * 1.0 + cached * 0.05 + output * 5.0) / 1_000_000
-    print(f"GPT 텍스트: 요청 {TEXT_USAGE['calls']}회, 입력 {total_input:,}토큰(캐시 {cached:,}), 출력 {output:,}토큰, 추정 USD {text_cost:.5f}")
+    total_cost = 0.0
+    for model, counters in TEXT_USAGE.items():
+        in_tokens = counters["input"]
+        cached = min(in_tokens, counters["cached_input"])
+        out_tokens = counters["output"]
+        rates = MODEL_PRICING[model]
+        estimated = (
+            (in_tokens - cached) * rates["input"]
+            + cached * rates["cached"]
+            + out_tokens * rates["output"]
+        ) / 1_000_000
+        total_cost += estimated
+        print(
+            f"{model}: 요청 {counters['calls']}회, 입력 {in_tokens:,}토큰"
+            f"(캐시 {cached:,}), 출력 {out_tokens:,}토큰, 추정 USD {estimated:.5f}"
+        )
+    print(f"전체 텍스트 API 사용 추정 USD {total_cost:.5f}")
+    print("추론 토큰은 API 출력 토큰 사용량에 포함됩니다. 실제 요금은 API 대시보드를 확인하세요.")
     print("이미지 생성 API는 호출하지 않습니다.")
 
 
@@ -268,7 +291,7 @@ def compose_email(article, draft):
         f"원문: {article['title']}\n"
         "출처: Psychology Today\n"
         f"원문 URL: {article['url']}\n\n"
-        "GPT-6.1 Terra로 작성한 검토용 초안입니다. 발행 전 원문과 사실관계를 확인하세요.\n"
+        "GPT-6.2 Sol로 작성한 검토용 초안입니다. 발행 전 원문과 사실관계를 확인하세요.\n"
     )
 
 
