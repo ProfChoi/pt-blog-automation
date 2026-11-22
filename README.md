@@ -20,11 +20,10 @@ Claude API는 더 이상 사용하지 않습니다. CLAUDE_API_KEY가 남아 있
 
 ## 안전한 첫 테스트
 1. Actions에서 Daily PT Blog (GPT-6.1 Terra)를 선택합니다.
-2. Run workflow를 클릭합니다. dry_run은 기본 true로 설정되어 있습니다.
-3. 해당 실행 기록 아래 Artifacts > pt-blog-preview를 내려받아 draft.txt를 확인합니다.
-4. 글이 적절한 경우에만 추후 dry_run=false로 수동 전송하거나 다음 정기 실행을 사용합니다.
+2. Run workflow를 클릭합니다. dry_run은 기본 false이므로 새로운 기사 한 편의 초안이 이메일로 발송됩니다.
+3. 이메일을 보내지 않고 확인만 하려면 dry_run을 체크(true)한 뒤 실행합니다. 이때 실행 기록의 Artifacts > pt-blog-preview에서 draft.txt를 확인할 수 있습니다.
 
-미리보기는 이메일을 보내거나 used_articles.txt를 바꾸지 않습니다. 정기 실행은 한 편의 이메일 발송이 성공한 다음에만 사용 기록을 추가하며 GitHub Actions가 이를 커밋합니다. 메일 전송은 성공했으나 Git 커밋이 실패하면 다음 실행에 중복 발송될 가능성이 있어 Actions 실행 상태를 확인해야 합니다.
+미리보기는 이메일을 보내거나 used_articles.txt를 바꾸지 않습니다. 정기 실행과 이메일 발송 수동 실행은 한 편의 이메일 발송이 성공한 다음에만 사용 기록을 추가하며 GitHub Actions가 이를 커밋합니다. 메일 전송은 성공했으나 Git 커밋이 실패하면 다음 실행 시 중복 발송될 가능성이 있어 Actions 실행 상태를 확인해야 합니다.
 
 ## 품질·사실 검증
 - 기사 본문 추출 실패 시 제목만으로 글을 생성하지 않고 해당 기사를 건너뜁니다.
