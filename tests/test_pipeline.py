@@ -61,6 +61,38 @@ class BlogTests(unittest.TestCase):
         self.assertEqual(args["json"]["contents"][0]["parts"][0]["text"], "예시 기사")
         client.responses.create.assert_not_called()
 
+    def test_gemini_retries_after_token_exhaustion(self):
+        first, second = MagicMock(), MagicMock()
+        first.json.return_value = {
+            "candidates": [{"finishReason": "MAX_TOKENS"}],
+            "usageMetadata": {"thoughtsTokenCount": 16000}
+        }
+        second.json.return_value = {
+            "candidates": [{"finishReason": "STOP", "content": {
+                "parts": [{"text": "완성된 원고"}]}}],
+            "usageMetadata": {"candidatesTokenCount": 250}
+        }
+        with patch.dict(blog.os.environ, {"GEMINI_API_KEY": "test-key"}), patch.dict(
+            blog.TEXT_USAGE, {blog.WRITING_MODEL: {"input": 0, "output": 0, "cached_input": 0, "calls": 0}}
+        ), patch.object(blog.requests, "post", side_effect=[first, second]) as post:
+            self.assertEqual(blog.call_writer(MagicMock(), "예시 기사"), "완성된 원고")
+            self.assertEqual(blog.TEXT_USAGE[blog.WRITING_MODEL]["calls"], 2)
+            self.assertEqual(blog.TEXT_USAGE[blog.WRITING_MODEL]["output"], 16250)
+        configs = [call.kwargs["json"]["generationConfig"] for call in post.call_args_list]
+        self.assertEqual(configs[0]["thinkingConfig"]["thinkingLevel"], "MEDIUM")
+        self.assertEqual(configs[1]["thinkingConfig"]["thinkingLevel"], "LOW")
+        self.assertGreater(configs[1]["maxOutputTokens"], configs[0]["maxOutputTokens"])
+
+    def test_gemini_does_not_retry_safety_block(self):
+        response = MagicMock()
+        response.json.return_value = {"promptFeedback": {"blockReason": "SAFETY"}}
+        with patch.dict(blog.os.environ, {"GEMINI_API_KEY": "test-key"}), patch.dict(
+            blog.TEXT_USAGE, {blog.WRITING_MODEL: {"input": 0, "output": 0, "cached_input": 0, "calls": 0}}
+        ), patch.object(blog.requests, "post", return_value=response) as post:
+            with self.assertRaisesRegex(RuntimeError, "SAFETY"):
+                blog.call_writer(MagicMock(), "예시 기사")
+            post.assert_called_once()
+
     def test_gemini_key_is_required(self):
         with patch.dict(blog.os.environ, {"GEMINI_API_KEY": ""}), patch.object(blog.requests, "post") as post:
             with self.assertRaisesRegex(RuntimeError, "GEMINI_API_KEY"):
