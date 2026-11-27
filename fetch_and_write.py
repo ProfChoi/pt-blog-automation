@@ -22,7 +22,7 @@ WRITING_MODEL = "gemini-4-neon"
 MODEL_PRICING = {
     # Standard API token prices in USD per 1M tokens
     SELECTION_MODEL: {"input": 1.0, "cached": 0.05, "output": 5.0},
-    WRITING_MODEL: {"input": 2.0, "cached": 0.10, "output": 10.0},
+    WRITING_MODEL: {"input": 3.0, "cached": 0.15, "output": 15.0},
 }
 TEXT_USAGE = {
     model: {"input": 0, "output": 0, "cached_input": 0, "calls": 0}
@@ -212,17 +212,55 @@ def draft_issues(text):
 
 
 def call_writer(client, prompt):
-    result = client.responses.create(
-        model=WRITING_MODEL,
-        reasoning={"effort": "medium"},
-        max_output_tokens=8000,
-        instructions=WRITING_GUIDE,
-        input=prompt,
+    key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("GEMINI_API_KEY가 설정되지 않았습니다.")
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{WRITING_MODEL}:generateContent"
     )
-    record_text_usage(result, WRITING_MODEL)
-    draft = (result.output_text or "").strip()
+
+    result = requests.post(
+        url,
+        headers={"x-goog-api-key": key},
+        json={
+            "systemInstruction": {
+                "parts": [{"text": WRITING_GUIDE}]
+            },
+            "contents": [
+                {"parts": [{"text": prompt}]}
+            ],
+            "generationConfig": {
+                "maxOutputTokens": 8000
+            }
+        },
+        timeout=180,
+    )
+    result.raise_for_status()
+    data = result.json()
+
+    usage = data.get("usageMetadata", {})
+    counters = TEXT_USAGE[WRITING_MODEL]
+    counters["calls"] += 1
+    counters["input"] += usage.get("promptTokenCount", 0)
+    counters["cached_input"] += usage.get("cachedContentTokenCount", 0)
+    counters["output"] += (
+        usage.get("candidatesTokenCount", 0)
+        + usage.get("thoughtsTokenCount", 0)
+    )
+
+    candidates = data.get("candidates", [])
+    parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
+    draft = "".join(
+        part.get("text", "") for part in parts
+        if not part.get("thought", False)
+    ).strip()
+
     if not draft:
-        raise RuntimeError("모델이 빈 원고를 반환했습니다.")
+        raise RuntimeError("Gemini가 빈 원고를 반환했습니다.")
+
+    print(f"글쓰기 모델: {WRITING_MODEL}")
     return draft
 
 
@@ -291,7 +329,7 @@ def compose_email(article, draft):
         f"원문: {article['title']}\n"
         "출처: Psychology Today\n"
         f"원문 URL: {article['url']}\n\n"
-        "GPT-6.2 Sol로 작성한 검토용 초안입니다. 발행 전 원문과 사실관계를 확인하세요.\n"
+        "Gemini 4 Neon으로 작성한 검토용 초안입니다. 발행 전 원문과 사실관계를 확인하세요.\n"
     )
 
 
