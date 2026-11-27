@@ -243,21 +243,42 @@ def call_writer(client, prompt, *, stage="draft"):
         f"{WRITING_MODEL}:generateContent"
     )
     # Leave room for both reasoning and the final essay; retry once on
-    # token exhaustion or an unexplained empty response, never on a safety block.
+    # token exhaustion, an unexplained empty response, or a request timeout.
+    # Never retry a safety block. A timed-out request may still be billed.
     for attempt, (level, limit) in enumerate(settings, 1):
-        result = requests.post(
-            url,
-            headers={"x-goog-api-key": key},
-            json={
-                "systemInstruction": {"parts": [{"text": guide}]},
-                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "maxOutputTokens": limit,
-                    "thinkingConfig": {"thinkingLevel": level}
-                }
-            },
-            timeout=180,
+        read_timeout = 420
+        print(
+            f"Gemini request stage={stage}, attempt={attempt}, thinking={level}, "
+            f"readTimeout={read_timeout}s",
+            flush=True,
         )
+        try:
+            result = requests.post(
+                url,
+                headers={"x-goog-api-key": key},
+                json={
+                    "systemInstruction": {"parts": [{"text": guide}]},
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "maxOutputTokens": limit,
+                        "thinkingConfig": {"thinkingLevel": level}
+                    }
+                },
+                timeout=(15, read_timeout),
+            )
+        except requests.exceptions.Timeout as exc:
+            print(
+                f"Gemini timeout stage={stage}, attempt={attempt}; "
+                "usage unknown; request may still be billed.",
+                flush=True,
+            )
+            if attempt == 1:
+                print(f"Gemini {stage}: retrying once after timeout.", flush=True)
+                continue
+            raise RuntimeError(
+                f"Gemini {stage} timed out after two attempts "
+                f"(read timeout {read_timeout}s per request)."
+            ) from exc
         result.raise_for_status()
         data = result.json()
 

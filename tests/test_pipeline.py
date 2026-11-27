@@ -146,6 +146,28 @@ class BlogTests(unittest.TestCase):
         self.assertEqual([c["thinkingConfig"]["thinkingLevel"] for c in configs], ["HIGH", "HIGH"])
         self.assertEqual([c["maxOutputTokens"] for c in configs], [32768, 65536])
 
+    def test_request_timeout_retries_only_current_stage(self):
+        response = MagicMock()
+        response.json.return_value = {"candidates": [{"finishReason": "STOP", "content": {
+            "parts": [{"text": "완성된 원고"}]}}]}
+        for stage, expected in (("draft", ["MEDIUM", "LOW"]), ("edit", ["HIGH", "HIGH"])):
+            with self.subTest(stage=stage), patch.dict(blog.os.environ, {"GEMINI_API_KEY": "test-key"}), patch.dict(
+                blog.TEXT_USAGE, {blog.WRITING_MODEL: {"input": 0, "output": 0, "cached_input": 0, "calls": 0}}
+            ), patch.object(blog.requests, "post", side_effect=[blog.requests.exceptions.ReadTimeout("test"), response]) as post:
+                self.assertEqual(blog.call_writer(MagicMock(), "원문과 초고", stage=stage), "완성된 원고")
+                self.assertEqual([c.kwargs["timeout"] for c in post.call_args_list], [(15, 420), (15, 420)])
+                self.assertEqual([c.kwargs["json"]["generationConfig"]["thinkingConfig"]["thinkingLevel"]
+                                  for c in post.call_args_list], expected)
+                self.assertEqual(blog.TEXT_USAGE[blog.WRITING_MODEL]["calls"], 1)
+
+    def test_two_request_timeouts_stop_without_unbounded_retry(self):
+        with patch.dict(blog.os.environ, {"GEMINI_API_KEY": "test-key"}), patch.object(
+            blog.requests, "post", side_effect=blog.requests.exceptions.ReadTimeout("test")
+        ) as post:
+            with self.assertRaisesRegex(RuntimeError, "edit timed out after two attempts"):
+                blog.call_writer(MagicMock(), "초고", stage="edit")
+            self.assertEqual(post.call_count, 2)
+
     def test_gemini_key_is_required(self):
         with patch.dict(blog.os.environ, {"GEMINI_API_KEY": ""}), patch.object(blog.requests, "post") as post:
             with self.assertRaisesRegex(RuntimeError, "GEMINI_API_KEY"):
