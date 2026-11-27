@@ -94,6 +94,58 @@ class BlogTests(unittest.TestCase):
                 blog.call_writer(MagicMock(), "예시 기사")
             post.assert_called_once()
 
+    def test_two_stage_writing_always_edits_valid_draft_with_high(self):
+        article = {"title": "Original article"}
+        source = "Original source text and evidence"
+        draft = "초고에 대한 심리학적 질문\n\n" + "가" * 1000
+        final = "퇴고한 심리학적 질문과 성찰\n\n" + "나" * 1000
+        responses = []
+        for value in (draft, final):
+            response = MagicMock()
+            response.json.return_value = {
+                "candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": value}]}}],
+                "usageMetadata": {"promptTokenCount": 100, "candidatesTokenCount": 50, "thoughtsTokenCount": 25}
+            }
+            responses.append(response)
+        with patch.dict(blog.os.environ, {"GEMINI_API_KEY": "test-key"}), patch.dict(
+            blog.TEXT_USAGE, {blog.WRITING_MODEL: {"input": 0, "output": 0, "cached_input": 0, "calls": 0}}
+        ), patch.object(blog.requests, "post", side_effect=responses) as post:
+            self.assertEqual(blog.write_blog(MagicMock(), article, source), final)
+            self.assertEqual(post.call_count, 2)
+            self.assertEqual(blog.TEXT_USAGE[blog.WRITING_MODEL], {
+                "input": 200, "output": 150, "cached_input": 0, "calls": 2
+            })
+        first, second = [call.kwargs["json"] for call in post.call_args_list]
+        self.assertEqual(first["generationConfig"]["thinkingConfig"]["thinkingLevel"], "MEDIUM")
+        self.assertEqual(second["generationConfig"]["thinkingConfig"]["thinkingLevel"], "HIGH")
+        self.assertIn(source, second["contents"][0]["parts"][0]["text"])
+        self.assertIn(draft, second["contents"][0]["parts"][0]["text"])
+        self.assertIn("전문 편집자", second["systemInstruction"]["parts"][0]["text"])
+        self.assertEqual(second["generationConfig"]["maxOutputTokens"], 32768)
+
+    def test_final_format_correction_stays_high_and_never_returns_bad_draft(self):
+        article = {"title": "Original article"}
+        valid = "심리학적 질문과 일상의 성찰\n\n" + "가" * 1000
+        with patch.object(blog, "call_writer", side_effect=[valid, "짧은 퇴고", valid]) as writer:
+            self.assertEqual(blog.write_blog(MagicMock(), article, "source"), valid)
+            self.assertEqual([c.kwargs["stage"] for c in writer.call_args_list], ["draft", "edit", "edit"])
+        with patch.object(blog, "call_writer", side_effect=[valid, "짧은 퇴고", "짧은 재퇴고"]):
+            with self.assertRaisesRegex(RuntimeError, "원고 품질 기준 미달"):
+                blog.write_blog(MagicMock(), article, "source")
+
+    def test_edit_token_retry_keeps_high(self):
+        first, second = MagicMock(), MagicMock()
+        first.json.return_value = {"candidates": [{"finishReason": "MAX_TOKENS"}]}
+        second.json.return_value = {"candidates": [{"finishReason": "STOP", "content": {
+            "parts": [{"text": "완성된 원고"}]}}]}
+        with patch.dict(blog.os.environ, {"GEMINI_API_KEY": "test-key"}), patch.dict(
+            blog.TEXT_USAGE, {blog.WRITING_MODEL: {"input": 0, "output": 0, "cached_input": 0, "calls": 0}}
+        ), patch.object(blog.requests, "post", side_effect=[first, second]) as post:
+            self.assertEqual(blog.call_writer(MagicMock(), "초고", stage="edit"), "완성된 원고")
+        configs = [call.kwargs["json"]["generationConfig"] for call in post.call_args_list]
+        self.assertEqual([c["thinkingConfig"]["thinkingLevel"] for c in configs], ["HIGH", "HIGH"])
+        self.assertEqual([c["maxOutputTokens"] for c in configs], [32768, 65536])
+
     def test_gemini_key_is_required(self):
         with patch.dict(blog.os.environ, {"GEMINI_API_KEY": ""}), patch.object(blog.requests, "post") as post:
             with self.assertRaisesRegex(RuntimeError, "GEMINI_API_KEY"):
