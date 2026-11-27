@@ -1,4 +1,4 @@
-"""Psychology Today → GPT-6.1 Terra → plain-text Gmail draft.
+"""Psychology Today → GPT-6.1 Terra → Gemini 4 Neon → plain-text Gmail draft.
 
 DRY_RUN=true saves a preview artifact without sending mail or marking articles used.
 """
@@ -220,48 +220,58 @@ def call_writer(client, prompt):
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{WRITING_MODEL}:generateContent"
     )
-
-    result = requests.post(
-        url,
-        headers={"x-goog-api-key": key},
-        json={
-            "systemInstruction": {
-                "parts": [{"text": WRITING_GUIDE}]
+    # Leave room for both reasoning and the final essay; retry once on
+    # token exhaustion or an unexplained empty response, never on a safety block.
+    for attempt, (level, limit) in enumerate((("MEDIUM", 16384), ("LOW", 32768)), 1):
+        result = requests.post(
+            url,
+            headers={"x-goog-api-key": key},
+            json={
+                "systemInstruction": {"parts": [{"text": WRITING_GUIDE}]},
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "maxOutputTokens": limit,
+                    "thinkingConfig": {"thinkingLevel": level}
+                }
             },
-            "contents": [
-                {"parts": [{"text": prompt}]}
-            ],
-            "generationConfig": {
-                "maxOutputTokens": 8000
-            }
-        },
-        timeout=180,
-    )
-    result.raise_for_status()
-    data = result.json()
+            timeout=180,
+        )
+        result.raise_for_status()
+        data = result.json()
 
-    usage = data.get("usageMetadata", {})
-    counters = TEXT_USAGE[WRITING_MODEL]
-    counters["calls"] += 1
-    counters["input"] += usage.get("promptTokenCount", 0)
-    counters["cached_input"] += usage.get("cachedContentTokenCount", 0)
-    counters["output"] += (
-        usage.get("candidatesTokenCount", 0)
-        + usage.get("thoughtsTokenCount", 0)
-    )
+        usage = data.get("usageMetadata") or {}
+        counters = TEXT_USAGE[WRITING_MODEL]
+        counters["calls"] += 1
+        counters["input"] += int(usage.get("promptTokenCount") or 0)
+        counters["cached_input"] += int(usage.get("cachedContentTokenCount") or 0)
+        output_tokens = int(usage.get("candidatesTokenCount") or 0)
+        thought_tokens = int(usage.get("thoughtsTokenCount") or 0)
+        counters["output"] += output_tokens + thought_tokens
 
-    candidates = data.get("candidates", [])
-    parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
-    draft = "".join(
-        part.get("text", "") for part in parts
-        if not part.get("thought", False)
-    ).strip()
+        candidates = data.get("candidates") or []
+        candidate = candidates[0] if candidates else {}
+        reason = candidate.get("finishReason") or "UNKNOWN"
+        block = (data.get("promptFeedback") or {}).get("blockReason") or ""
+        parts = (candidate.get("content") or {}).get("parts") or []
+        draft = "".join(
+            part.get("text") or "" for part in parts
+            if not part.get("thought", False)
+        ).strip()
+        print(
+            f"Gemini attempt={attempt}, thinking={level}, limit={limit}, "
+            f"finishReason={reason}, blockReason={block or 'none'}, "
+            f"thoughtTokens={thought_tokens}, outputTokens={output_tokens}, "
+            f"textChars={len(draft)}"
+        )
+        if not block and reason in ("STOP", "UNKNOWN") and draft:
+            print(f"글쓰기 모델: {WRITING_MODEL}")
+            return draft
+        if block or reason not in ("STOP", "UNKNOWN", "MAX_TOKENS"):
+            raise RuntimeError(f"Gemini 원고 생성 중단: finishReason={reason}, blockReason={block or 'none'}")
+        if attempt == 1:
+            print("Gemini 원고 미완료 또는 빈 응답: 추론 수준을 낮춰 1회 재시도합니다.")
 
-    if not draft:
-        raise RuntimeError("Gemini가 빈 원고를 반환했습니다.")
-
-    print(f"글쓰기 모델: {WRITING_MODEL}")
-    return draft
+    raise RuntimeError(f"Gemini 원고 생성 실패: finishReason={reason}, outputTokens={output_tokens}, thoughtTokens={thought_tokens}")
 
 
 def write_blog(client, article, source):
