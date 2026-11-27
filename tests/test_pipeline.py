@@ -79,10 +79,10 @@ class BlogTests(unittest.TestCase):
             self.assertEqual(blog.TEXT_USAGE[blog.WRITING_MODEL]["calls"], 2)
             self.assertEqual(blog.TEXT_USAGE[blog.WRITING_MODEL]["output"], 16250)
         configs = [call.kwargs["json"]["generationConfig"] for call in post.call_args_list]
-        self.assertEqual(configs[0]["thinkingConfig"]["thinkingLevel"], "HIGH")
-        self.assertEqual(configs[1]["thinkingConfig"]["thinkingLevel"], "MEDIUM")
-        self.assertEqual(configs[0]["maxOutputTokens"], 32768)
-        self.assertEqual(configs[1]["maxOutputTokens"], 65536)
+        self.assertEqual(configs[0]["thinkingConfig"]["thinkingLevel"], "MEDIUM")
+        self.assertEqual(configs[1]["thinkingConfig"]["thinkingLevel"], "LOW")
+        self.assertEqual(configs[0]["maxOutputTokens"], 16384)
+        self.assertEqual(configs[1]["maxOutputTokens"], 32768)
 
     def test_gemini_does_not_retry_safety_block(self):
         response = MagicMock()
