@@ -18,9 +18,9 @@ class FakeResponse:
 class BlogTests(unittest.TestCase):
     def test_model_routing(self):
         self.assertEqual(blog.SELECTION_MODEL, "gpt-6.1-terra")
-        self.assertEqual(blog.WRITING_MODEL, "gpt-6.2-sol")
+        self.assertEqual(blog.WRITING_MODEL, "gemini-4-neon")
         self.assertEqual(blog.MODEL_PRICING[blog.SELECTION_MODEL]["output"], 5.0)
-        self.assertEqual(blog.MODEL_PRICING[blog.WRITING_MODEL]["output"], 10.0)
+        self.assertEqual(blog.MODEL_PRICING[blog.WRITING_MODEL]["output"], 15.0)
 
     def test_article_selection_uses_terra_no_reasoning(self):
         client = MagicMock()
@@ -32,23 +32,48 @@ class BlogTests(unittest.TestCase):
         self.assertEqual(args["model"], blog.SELECTION_MODEL)
         self.assertEqual(args["reasoning"], {"effort": "none"})
 
-    def test_essay_writing_uses_sol_medium_reasoning(self):
+    def test_essay_writing_uses_gemini_neon(self):
         client = MagicMock()
-        client.responses.create.return_value = SimpleNamespace(output_text="차분한 마음의 이야기\n\n본문입니다.", usage=None)
-        result = blog.call_writer(client, "예시 기사")
-        self.assertTrue(result.startswith("차분한"))
-        args = client.responses.create.call_args.kwargs
-        self.assertEqual(args["model"], blog.WRITING_MODEL)
-        self.assertEqual(args["reasoning"], {"effort": "medium"})
-        self.assertIn("심리학 에세이", args["instructions"])
+        response = MagicMock()
+        response.json.return_value = {
+            "candidates": [{"content": {"parts": [
+                {"text": "internal reasoning", "thought": True},
+                {"text": "차분한 마음의 이야기\n\n본문입니다."}
+            ]}}],
+            "usageMetadata": {
+                "promptTokenCount": 1000, "cachedContentTokenCount": 100,
+                "candidatesTokenCount": 250, "thoughtsTokenCount": 80
+            }
+        }
+        with patch.dict(blog.os.environ, {"GEMINI_API_KEY": "test-key"}), patch.dict(
+            blog.TEXT_USAGE, {blog.WRITING_MODEL: {"input": 0, "output": 0, "cached_input": 0, "calls": 0}}
+        ), patch.object(blog.requests, "post", return_value=response) as post:
+            result = blog.call_writer(client, "예시 기사")
+            self.assertTrue(result.startswith("차분한"))
+            self.assertNotIn("internal reasoning", result)
+            self.assertEqual(blog.TEXT_USAGE[blog.WRITING_MODEL], {
+                "input": 1000, "output": 330, "cached_input": 100, "calls": 1
+            })
+        self.assertTrue(post.call_args.args[0].endswith("/gemini-4-neon:generateContent"))
+        args = post.call_args.kwargs
+        self.assertEqual(args["headers"]["x-goog-api-key"], "test-key")
+        self.assertIn("심리학 에세이", args["json"]["systemInstruction"]["parts"][0]["text"])
+        self.assertEqual(args["json"]["contents"][0]["parts"][0]["text"], "예시 기사")
+        client.responses.create.assert_not_called()
+
+    def test_gemini_key_is_required(self):
+        with patch.dict(blog.os.environ, {"GEMINI_API_KEY": ""}), patch.object(blog.requests, "post") as post:
+            with self.assertRaisesRegex(RuntimeError, "GEMINI_API_KEY"):
+                blog.call_writer(MagicMock(), "예시 기사")
+            post.assert_not_called()
 
     def test_usage_is_tracked_by_model(self):
         usage = SimpleNamespace(input_tokens=1000, output_tokens=250, input_tokens_details=SimpleNamespace(cached_tokens=100))
         record = SimpleNamespace(usage=usage)
-        with patch.dict(blog.TEXT_USAGE, {blog.WRITING_MODEL: {"input": 0, "output": 0, "cached_input": 0, "calls": 0}}):
-            blog.record_text_usage(record, blog.WRITING_MODEL)
-            self.assertEqual(blog.TEXT_USAGE[blog.WRITING_MODEL]["input"], 1000)
-            self.assertEqual(blog.TEXT_USAGE[blog.WRITING_MODEL]["calls"], 1)
+        with patch.dict(blog.TEXT_USAGE, {blog.SELECTION_MODEL: {"input": 0, "output": 0, "cached_input": 0, "calls": 0}}):
+            blog.record_text_usage(record, blog.SELECTION_MODEL)
+            self.assertEqual(blog.TEXT_USAGE[blog.SELECTION_MODEL]["input"], 1000)
+            self.assertEqual(blog.TEXT_USAGE[blog.SELECTION_MODEL]["calls"], 1)
 
     def test_pt_url_restriction(self):
         self.assertTrue(blog.is_pt_url("https://www.psychologytoday.com/us/blog/example"))
@@ -113,7 +138,7 @@ class BlogTests(unittest.TestCase):
         self.assertIn("출처: Psychology Today", body)
         self.assertIn("원문 URL: https://www.psychologytoday.com", body)
         self.assertNotIn("Claude", body)
-        self.assertIn("GPT-6.2 Sol", body)
+        self.assertIn("Gemini 4 Neon", body)
         self.assertNotIn("<html>", body)
 
     def test_only_one_main_guard(self):
