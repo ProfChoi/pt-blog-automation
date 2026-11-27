@@ -18,7 +18,7 @@ from bs4 import BeautifulSoup
 from openai import OpenAI
 
 SELECTION_MODEL = "gpt-6.1-terra"
-WRITING_MODEL = "gpt-6.2-sol"
+WRITING_MODEL = "gemini-4-neon"
 MODEL_PRICING = {
     # Standard API token prices in USD per 1M tokens
     SELECTION_MODEL: {"input": 1.0, "cached": 0.05, "output": 5.0},
