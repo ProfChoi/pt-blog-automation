@@ -9,7 +9,7 @@ on:
         description: "체크하면 미리보기만 저장합니다. 체크하지 않으면 이메일로 발송합니다."
         type: boolean
         required: true
-        default: false
+        default: true
 
 permissions:
   contents: write
@@ -45,7 +45,7 @@ jobs:
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
-          DRY_RUN: ${{ inputs.dry_run }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: python fetch_and_write.py
 
       - name: Upload preview draft
