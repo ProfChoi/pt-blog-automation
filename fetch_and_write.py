@@ -222,7 +222,7 @@ def call_writer(client, prompt):
     )
     # Leave room for both reasoning and the final essay; retry once on
     # token exhaustion or an unexplained empty response, never on a safety block.
-    for attempt, (level, limit) in enumerate((("MEDIUM", 16384), ("LOW", 32768)), 1):
+    for attempt, (level, limit) in enumerate((("HIGH", 32768), ("MEDIUM", 65536)), 1):
         result = requests.post(
             url,
             headers={"x-goog-api-key": key},
